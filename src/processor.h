@@ -17,6 +17,14 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_dsp/juce_dsp.h>
+
+// TODO: Move this back to 4096 and introduce latency
+constexpr int fft_window_size = 512;
+constexpr int fft_order = 9;
+
+static_assert(1 << fft_order == fft_window_size,
+              "The FFT order and FFT window sizes don't match up");
 
 // TODO: Rewrite, this is from the example
 
@@ -28,7 +36,8 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor {
     ~AudioPluginAudioProcessor() override;
 
     //==============================================================================
-    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void prepareToPlay(double sampleRate,
+                       int maximumExpectedSamplesPerBlock) override;
     void releaseResources() override;
 
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
@@ -60,6 +69,19 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor {
     void setStateInformation(const void* data, int sizeInBytes) override;
 
    private:
-    //==============================================================================
+    juce::dsp::FFT fft;
+    /**
+     * We need a scratch buffer that can contain `fft_window_size * 2` samples.
+     */
+    std::vector<float> fft_scratch_buffer;
+
+    /**
+     * This will contain `fft_window_size` compressors. We'll compress the
+     * magnitude of every FFT bin (`sqrt(i^2 + r^2)`) individually, and then
+     * scale both the real and imaginary components by the ratio of their
+     * magnitude and the compressed value.
+     */
+    std::vector<juce::dsp::Compressor<float>> spectral_compressors;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)
 };

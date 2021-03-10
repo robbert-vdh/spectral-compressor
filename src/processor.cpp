@@ -20,6 +20,8 @@
 
 // TODO: Rewrite, this is from the example
 
+using juce::uint32;
+
 //==============================================================================
 AudioPluginAudioProcessor::AudioPluginAudioProcessor()
     : AudioProcessor(
@@ -30,7 +32,8 @@ AudioPluginAudioProcessor::AudioPluginAudioProcessor()
 #endif
               .withOutput("Output", juce::AudioChannelSet::stereo(), true)
 #endif
-      ) {
+              ),
+      fft(fft_order) {
 }
 
 AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {}
@@ -92,17 +95,34 @@ void AudioPluginAudioProcessor::changeProgramName(int index,
     juce::ignoreUnused(index, newName);
 }
 
-//==============================================================================
-void AudioPluginAudioProcessor::prepareToPlay(double sampleRate,
-                                              int samplesPerBlock) {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
-    juce::ignoreUnused(sampleRate, samplesPerBlock);
+void AudioPluginAudioProcessor::prepareToPlay(
+    double sampleRate,
+    int maximumExpectedSamplesPerBlock) {
+    // TODO: The FFT settings are now fixed, we'll want to make this
+    //       configurable later
+
+    // JUCE's FFT class interleaves the real and imaginary numbers, so this
+    // buffer should be twice the window size in size
+    fft_scratch_buffer.resize(fft_window_size * 2);
+
+    // Every FFT bin gets its own compressor, hooray!
+    // TODO: Make the compressor settings configurable
+    juce::dsp::Compressor<float> compressor{};
+    compressor.setThreshold(-10);
+    compressor.setRatio(3.0);
+    compressor.setAttack(10);
+    compressor.setRelease(30);
+    compressor.prepare(juce::dsp::ProcessSpec{
+        .sampleRate = sampleRate,
+        .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
+        .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
+
+    spectral_compressors.resize(fft_window_size, compressor);
 }
 
 void AudioPluginAudioProcessor::releaseResources() {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
+    fft_scratch_buffer.clear();
+    spectral_compressors.clear();
 }
 
 bool AudioPluginAudioProcessor::isBusesLayoutSupported(
@@ -129,10 +149,9 @@ bool AudioPluginAudioProcessor::isBusesLayoutSupported(
 #endif
 }
 
-void AudioPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
-                                             juce::MidiBuffer& midiMessages) {
-    juce::ignoreUnused(midiMessages);
-
+void AudioPluginAudioProcessor::processBlock(
+    juce::AudioBuffer<float>& buffer,
+    juce::MidiBuffer& /*midiMessages*/) {
     juce::ScopedNoDenormals noDenormals;
     auto totalNumInputChannels = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();

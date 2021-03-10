@@ -48,4 +48,5 @@ target_link_libraries(SpectralCompressor PUBLIC
   juce::juce_recommended_config_flags
 
   PRIVATE
-  juce::juce_audio_utils)
+  juce::juce_audio_utils
+  juce::juce_dsp)
