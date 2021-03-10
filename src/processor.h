@@ -19,9 +19,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
-// TODO: Move this back to 4096 and introduce latency
-constexpr int fft_window_size = 512;
-constexpr int fft_order = 9;
+constexpr int fft_window_size = 4096;
+constexpr int fft_order = 12;
 
 static_assert(1 << fft_order == fft_window_size,
               "The FFT order and FFT window sizes don't match up");
@@ -62,17 +61,37 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
    private:
     juce::dsp::FFT fft;
     /**
-     * We need a scratch buffer that can contain `fft_window_size * 2` samples.
+     * We need a scratch buffer per channel that can contain `fft_window_size *
+     * 2` samples.
+     *
+     * TODO: For this and a few other things we're using vectors instead of
+     *       `std::array<>` right now because the FFT sizes should be
+     *       configurable by the user at some point.
      */
-    std::vector<float> fft_scratch_buffer;
+    std::vector<std::vector<float>> fft_scratch_buffer;
 
     /**
-     * For every channel, this will contain `fft_window_size` compressors. We'll
+     * This will contain `fft_window_size` compressors. The compressors are
+     * already multichannel so we don't need a nested vector here. We'll
      * compress the magnitude of every FFT bin (`sqrt(i^2 + r^2)`) individually,
      * and then scale both the real and imaginary components by the ratio of
      * their magnitude and the compressed value.
      */
-    std::vector<std::vector<juce::dsp::Compressor<float>>> spectral_compressors;
+    std::vector<juce::dsp::Compressor<float>> spectral_compressors;
+
+    /**
+     * Skip the FFT processing on the first iteration, since this results in
+     * artifacts.
+     */
+    bool first_iteration = false;
+
+    /**
+     * A ring buffer of size `fft_window_size` for every channel.
+     *
+     * TODO: Replace this with a better premade implementation
+     */
+    std::vector<std::vector<float>> ring_buffers;
+    std::vector<size_t> ring_buffer_pos;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };

@@ -34,6 +34,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
 #endif
               ),
       fft(fft_order) {
+    setLatencySamples(4096);
 }
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
@@ -99,27 +100,37 @@ void SpectralCompressorProcessor::prepareToPlay(
 
     // JUCE's FFT class interleaves the real and imaginary numbers, so this
     // buffer should be twice the window size in size
-    fft_scratch_buffer.resize(fft_window_size * 2);
+    fft_scratch_buffer.resize(static_cast<size_t>(getTotalNumInputChannels()),
+                              std::vector(fft_window_size * 2, 0.0f));
 
     // Every FFT bin on both channels gets its own compressor, hooray!
     // TODO: Make the compressor settings configurable
+    // TODO: These settings are also very extreme
     juce::dsp::Compressor<float> compressor{};
-    compressor.setThreshold(-10);
-    compressor.setRatio(3.0);
+    compressor.setThreshold(-20);
+    compressor.setRatio(50.0);
     compressor.setAttack(10);
-    compressor.setRelease(30);
+    compressor.setRelease(100);
     compressor.prepare(juce::dsp::ProcessSpec{
         .sampleRate = sampleRate,
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
-    spectral_compressors.resize(static_cast<size_t>(getTotalNumInputChannels()),
-                                std::vector(fft_window_size, compressor));
+    spectral_compressors.resize(fft_window_size, compressor);
+
+    first_iteration = true;
+
+    // We use ring buffers to fill our FFT buffers
+    ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
+                        std::vector(fft_window_size, 0.0f));
+    ring_buffer_pos.resize(static_cast<size_t>(getTotalNumInputChannels()));
 }
 
 void SpectralCompressorProcessor::releaseResources() {
     fft_scratch_buffer.clear();
     spectral_compressors.clear();
+    ring_buffers.clear();
+    ring_buffer_pos.clear();
 }
 
 bool SpectralCompressorProcessor::isBusesLayoutSupported(
@@ -149,17 +160,85 @@ void SpectralCompressorProcessor::processBlock(
     juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer& /*midiMessages*/) {
     juce::ScopedNoDenormals noDenormals;
-    const int input_channels = getTotalNumInputChannels();
-    const int output_channels = getTotalNumOutputChannels();
+
+    const size_t input_channels =
+        static_cast<size_t>(getTotalNumInputChannels());
+    const size_t output_channels =
+        static_cast<size_t>(getTotalNumOutputChannels());
+    const size_t num_samples = static_cast<size_t>(buffer.getNumSamples());
 
     // Zero out all unused channels
     for (auto i = input_channels; i < output_channels; i++) {
         buffer.clear(i, 0, buffer.getNumSamples());
     }
 
-    for (int channel = 0; channel < input_channels; channel++) {
-        float* channelData = buffer.getWritePointer(channel);
-        juce::ignoreUnused(channelData);
+    // TODO: Add oversampling, potentially reduce latency
+    // TODO: Handle buffers that are smaller than our FFT window
+    // TODO: Handle buffers that are not a clean multiple of our FFT window
+    // TODO: First iteration should be skipped
+    for (size_t channel = 0; channel < input_channels; channel++) {
+        const size_t current_ring_buffer_pos = ring_buffer_pos[channel];
+
+        // If our ring buffer got filled, then we can do another round of FFT
+        // processing
+        // HACK: This only works because we can divide `fft_window_size` by our
+        //       buffer size
+        if (current_ring_buffer_pos == 0 && !first_iteration) {
+            std::copy(ring_buffers[channel].begin(),
+                      ring_buffers[channel].end(),
+                      fft_scratch_buffer[channel].begin());
+
+            fft.performRealOnlyForwardTransform(
+                fft_scratch_buffer[channel].data(), true);
+
+            // We'll compress every FTT bin individually
+            for (size_t i = 0; i < fft_scratch_buffer[channel].size(); i += 2) {
+                // TODO: Or are these reversed? Doesn't really matter
+                const float real = fft_scratch_buffer[channel][i];
+                const float imag = fft_scratch_buffer[channel][i + 1];
+                const float magnitude =
+                    std::sqrt((real * real) + (imag * imag));
+
+                // The real and imaginary parts are interleaved, so ever bin
+                // spans two values in the scratch buffer
+                const size_t compressor_idx = i / 2;
+                const float compressed_magnitude =
+                    spectral_compressors[compressor_idx].processSample(
+                        channel, magnitude);
+
+                // We need to scale both components by the same value
+                const float compression_multiplier =
+                    compressed_magnitude / magnitude;
+                fft_scratch_buffer[channel][i] *= compression_multiplier;
+                fft_scratch_buffer[channel][i + 1] *= compression_multiplier;
+            }
+
+            fft.performRealOnlyInverseTransform(
+                fft_scratch_buffer[channel].data());
+        }
+
+        // Copy the input audio into our ring buffer and increment the position
+        // (we can do this because we already store this iteration's position)
+        float* input_samples = buffer.getWritePointer(channel);
+        std::copy(input_samples, input_samples + num_samples,
+                  &ring_buffers[channel][current_ring_buffer_pos]);
+        ring_buffer_pos[channel] += num_samples;
+        if (ring_buffer_pos[channel] >= ring_buffers[channel].size()) {
+            // TODO: This too of course only works when things divide cleanly!
+            ring_buffer_pos[channel] = 0;
+        }
+
+        // Copy over the audio from the previous FFT processing cycle.
+        // Everything uses the same ring buffer position.
+        // TODO: This too of course only works when the buffer size is cleanly
+        //       divisible by the FFT window size
+        // TODO: The gain multiplier is for makeup gain. This of course needs to
+        //       be dependent on the compressor settings
+        buffer.copyFrom(channel, 0,
+                        &fft_scratch_buffer[channel][current_ring_buffer_pos],
+                        num_samples, 10.0f);
+
+        first_iteration = false;
     }
 }
 
