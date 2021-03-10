@@ -23,7 +23,7 @@
 using juce::uint32;
 
 //==============================================================================
-AudioPluginAudioProcessor::AudioPluginAudioProcessor()
+SpectralCompressorProcessor::SpectralCompressorProcessor()
     : AudioProcessor(
           BusesProperties()
 #if !JucePlugin_IsMidiEffect
@@ -36,14 +36,14 @@ AudioPluginAudioProcessor::AudioPluginAudioProcessor()
       fft(fft_order) {
 }
 
-AudioPluginAudioProcessor::~AudioPluginAudioProcessor() {}
+SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
 
 //==============================================================================
-const juce::String AudioPluginAudioProcessor::getName() const {
+const juce::String SpectralCompressorProcessor::getName() const {
     return JucePlugin_Name;
 }
 
-bool AudioPluginAudioProcessor::acceptsMidi() const {
+bool SpectralCompressorProcessor::acceptsMidi() const {
 #if JucePlugin_WantsMidiInput
     return true;
 #else
@@ -51,7 +51,7 @@ bool AudioPluginAudioProcessor::acceptsMidi() const {
 #endif
 }
 
-bool AudioPluginAudioProcessor::producesMidi() const {
+bool SpectralCompressorProcessor::producesMidi() const {
 #if JucePlugin_ProducesMidiOutput
     return true;
 #else
@@ -59,7 +59,7 @@ bool AudioPluginAudioProcessor::producesMidi() const {
 #endif
 }
 
-bool AudioPluginAudioProcessor::isMidiEffect() const {
+bool SpectralCompressorProcessor::isMidiEffect() const {
 #if JucePlugin_IsMidiEffect
     return true;
 #else
@@ -67,35 +67,36 @@ bool AudioPluginAudioProcessor::isMidiEffect() const {
 #endif
 }
 
-double AudioPluginAudioProcessor::getTailLengthSeconds() const {
+double SpectralCompressorProcessor::getTailLengthSeconds() const {
     return 0.0;
 }
 
-int AudioPluginAudioProcessor::getNumPrograms() {
+int SpectralCompressorProcessor::getNumPrograms() {
     return 1;  // NB: some hosts don't cope very well if you tell them there are
                // 0 programs, so this should be at least 1, even if you're not
                // really implementing programs.
 }
 
-int AudioPluginAudioProcessor::getCurrentProgram() {
+int SpectralCompressorProcessor::getCurrentProgram() {
     return 0;
 }
 
-void AudioPluginAudioProcessor::setCurrentProgram(int index) {
+void SpectralCompressorProcessor::setCurrentProgram(int index) {
     juce::ignoreUnused(index);
 }
 
-const juce::String AudioPluginAudioProcessor::getProgramName(int index) {
+const juce::String SpectralCompressorProcessor::getProgramName(int index) {
     juce::ignoreUnused(index);
     return {};
 }
 
-void AudioPluginAudioProcessor::changeProgramName(int index,
-                                                  const juce::String& newName) {
+void SpectralCompressorProcessor::changeProgramName(
+    int index,
+    const juce::String& newName) {
     juce::ignoreUnused(index, newName);
 }
 
-void AudioPluginAudioProcessor::prepareToPlay(
+void SpectralCompressorProcessor::prepareToPlay(
     double sampleRate,
     int maximumExpectedSamplesPerBlock) {
     // TODO: The FFT settings are now fixed, we'll want to make this
@@ -120,12 +121,12 @@ void AudioPluginAudioProcessor::prepareToPlay(
     spectral_compressors.resize(fft_window_size, compressor);
 }
 
-void AudioPluginAudioProcessor::releaseResources() {
+void SpectralCompressorProcessor::releaseResources() {
     fft_scratch_buffer.clear();
     spectral_compressors.clear();
 }
 
-bool AudioPluginAudioProcessor::isBusesLayoutSupported(
+bool SpectralCompressorProcessor::isBusesLayoutSupported(
     const BusesLayout& layouts) const {
 #if JucePlugin_IsMidiEffect
     juce::ignoreUnused(layouts);
@@ -149,7 +150,7 @@ bool AudioPluginAudioProcessor::isBusesLayoutSupported(
 #endif
 }
 
-void AudioPluginAudioProcessor::processBlock(
+void SpectralCompressorProcessor::processBlock(
     juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer& /*midiMessages*/) {
     juce::ScopedNoDenormals noDenormals;
@@ -179,17 +180,17 @@ void AudioPluginAudioProcessor::processBlock(
 }
 
 //==============================================================================
-bool AudioPluginAudioProcessor::hasEditor() const {
+bool SpectralCompressorProcessor::hasEditor() const {
     return true;  // (change this to false if you choose to not supply an
                   // editor)
 }
 
-juce::AudioProcessorEditor* AudioPluginAudioProcessor::createEditor() {
-    return new AudioPluginAudioProcessorEditor(*this);
+juce::AudioProcessorEditor* SpectralCompressorProcessor::createEditor() {
+    return new SpectralCompressorEditor(*this);
 }
 
 //==============================================================================
-void AudioPluginAudioProcessor::getStateInformation(
+void SpectralCompressorProcessor::getStateInformation(
     juce::MemoryBlock& destData) {
     // You should use this method to store your parameters in the memory block.
     // You could do that either as raw data, or use the XML or ValueTree classes
@@ -197,8 +198,8 @@ void AudioPluginAudioProcessor::getStateInformation(
     juce::ignoreUnused(destData);
 }
 
-void AudioPluginAudioProcessor::setStateInformation(const void* data,
-                                                    int sizeInBytes) {
+void SpectralCompressorProcessor::setStateInformation(const void* data,
+                                                      int sizeInBytes) {
     // You should use this method to restore your parameters from this memory
     // block, whose contents will have been created by the getStateInformation()
     // call.
@@ -208,5 +209,5 @@ void AudioPluginAudioProcessor::setStateInformation(const void* data,
 //==============================================================================
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
-    return new AudioPluginAudioProcessor();
+    return new SpectralCompressorProcessor();
 }

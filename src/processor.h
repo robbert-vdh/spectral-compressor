@@ -29,11 +29,11 @@ static_assert(1 << fft_order == fft_window_size,
 // TODO: Rewrite, this is from the example
 
 //==============================================================================
-class AudioPluginAudioProcessor : public juce::AudioProcessor {
+class SpectralCompressorProcessor : public juce::AudioProcessor {
    public:
     //==============================================================================
-    AudioPluginAudioProcessor();
-    ~AudioPluginAudioProcessor() override;
+    SpectralCompressorProcessor();
+    ~SpectralCompressorProcessor() override;
 
     //==============================================================================
     void prepareToPlay(double sampleRate,
@@ -83,5 +83,5 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor {
      */
     std::vector<juce::dsp::Compressor<float>> spectral_compressors;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };

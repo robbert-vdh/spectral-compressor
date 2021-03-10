@@ -21,8 +21,8 @@
 // TODO: Rewrite, this is from the example
 
 //==============================================================================
-AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
-    AudioPluginAudioProcessor& p)
+SpectralCompressorEditor::SpectralCompressorEditor(
+    SpectralCompressorProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p) {
     juce::ignoreUnused(processorRef);
     // Make sure that before the constructor has finished, you've set the
@@ -30,10 +30,10 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor(
     setSize(400, 300);
 }
 
-AudioPluginAudioProcessorEditor::~AudioPluginAudioProcessorEditor() {}
+SpectralCompressorEditor::~SpectralCompressorEditor() {}
 
 //==============================================================================
-void AudioPluginAudioProcessorEditor::paint(juce::Graphics& g) {
+void SpectralCompressorEditor::paint(juce::Graphics& g) {
     // (Our component is opaque, so we must completely fill the background with
     // a solid colour)
     g.fillAll(
@@ -45,7 +45,7 @@ void AudioPluginAudioProcessorEditor::paint(juce::Graphics& g) {
                      juce::Justification::centred, 1);
 }
 
-void AudioPluginAudioProcessorEditor::resized() {
+void SpectralCompressorEditor::resized() {
     // This is generally where you'll want to lay out the positions of any
     // subcomponents in your editor..
 }

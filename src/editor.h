@@ -21,10 +21,10 @@
 // TODO: Rewrite, this is from the example
 
 //==============================================================================
-class AudioPluginAudioProcessorEditor : public juce::AudioProcessorEditor {
+class SpectralCompressorEditor : public juce::AudioProcessorEditor {
    public:
-    explicit AudioPluginAudioProcessorEditor(AudioPluginAudioProcessor&);
-    ~AudioPluginAudioProcessorEditor() override;
+    explicit SpectralCompressorEditor(SpectralCompressorProcessor&);
+    ~SpectralCompressorEditor() override;
 
     //==============================================================================
     void paint(juce::Graphics&) override;
@@ -33,8 +33,7 @@ class AudioPluginAudioProcessorEditor : public juce::AudioProcessorEditor {
    private:
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
-    AudioPluginAudioProcessor& processorRef;
+    SpectralCompressorProcessor& processorRef;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(
-        AudioPluginAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorEditor)
 };
