@@ -106,7 +106,7 @@ void SpectralCompressorProcessor::prepareToPlay(
     // buffer should be twice the window size in size
     fft_scratch_buffer.resize(fft_window_size * 2);
 
-    // Every FFT bin gets its own compressor, hooray!
+    // Every FFT bin on both channels gets its own compressor, hooray!
     // TODO: Make the compressor settings configurable
     juce::dsp::Compressor<float> compressor{};
     compressor.setThreshold(-10);
@@ -118,7 +118,8 @@ void SpectralCompressorProcessor::prepareToPlay(
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
-    spectral_compressors.resize(fft_window_size, compressor);
+    spectral_compressors.resize(static_cast<size_t>(getTotalNumInputChannels()),
+                                std::vector(fft_window_size, compressor));
 }
 
 void SpectralCompressorProcessor::releaseResources() {

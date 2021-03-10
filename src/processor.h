@@ -76,12 +76,12 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     std::vector<float> fft_scratch_buffer;
 
     /**
-     * This will contain `fft_window_size` compressors. We'll compress the
-     * magnitude of every FFT bin (`sqrt(i^2 + r^2)`) individually, and then
-     * scale both the real and imaginary components by the ratio of their
-     * magnitude and the compressed value.
+     * For every channel, this will contain `fft_window_size` compressors. We'll
+     * compress the magnitude of every FFT bin (`sqrt(i^2 + r^2)`) individually,
+     * and then scale both the real and imaginary components by the ratio of
+     * their magnitude and the compressed value.
      */
-    std::vector<juce::dsp::Compressor<float>> spectral_compressors;
+    std::vector<std::vector<juce::dsp::Compressor<float>>> spectral_compressors;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };
