@@ -18,22 +18,16 @@
 
 #include "processor.h"
 
-// TODO: Rewrite, this is from the example
-
-//==============================================================================
 class SpectralCompressorEditor : public juce::AudioProcessorEditor {
    public:
     explicit SpectralCompressorEditor(SpectralCompressorProcessor&);
     ~SpectralCompressorEditor() override;
 
-    //==============================================================================
     void paint(juce::Graphics&) override;
     void resized() override;
 
    private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
-    SpectralCompressorProcessor& processorRef;
+    SpectralCompressorProcessor& processor;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorEditor)
 };

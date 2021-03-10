@@ -18,15 +18,9 @@
 
 #include "processor.h"
 
-// TODO: Rewrite, this is from the example
-
-//==============================================================================
 SpectralCompressorEditor::SpectralCompressorEditor(
     SpectralCompressorProcessor& p)
-    : AudioProcessorEditor(&p), processorRef(p) {
-    juce::ignoreUnused(processorRef);
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
+    : AudioProcessorEditor(&p), processor(p) {
     setSize(400, 300);
 }
 
@@ -34,8 +28,7 @@ SpectralCompressorEditor::~SpectralCompressorEditor() {}
 
 //==============================================================================
 void SpectralCompressorEditor::paint(juce::Graphics& g) {
-    // (Our component is opaque, so we must completely fill the background with
-    // a solid colour)
+    // TODO: Replace with something else. Or drop the GUI.
     g.fillAll(
         getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
 
@@ -46,6 +39,5 @@ void SpectralCompressorEditor::paint(juce::Graphics& g) {
 }
 
 void SpectralCompressorEditor::resized() {
-    // This is generally where you'll want to lay out the positions of any
-    // subcomponents in your editor..
+    // TODO
 }
