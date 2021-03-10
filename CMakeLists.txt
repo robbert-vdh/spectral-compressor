@@ -32,6 +32,9 @@ target_sources(SpectralCompressor PRIVATE
   src/editor.cpp
   src/processor.cpp)
 
+target_compile_features(SpectralCompressor PUBLIC cxx_std_20)
+set_target_properties(SpectralCompressor PROPERTIES CXX_EXTENSIONS OFF)
+
 target_compile_definitions(SpectralCompressor PUBLIC
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
