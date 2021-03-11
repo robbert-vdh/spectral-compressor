@@ -80,12 +80,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     std::vector<juce::dsp::Compressor<float>> spectral_compressors;
 
     /**
-     * Skip the FFT processing on the first iteration, since this results in
-     * artifacts.
-     */
-    bool first_iteration = false;
-
-    /**
      * A ring buffer of size `fft_window_size` for every channel.
      *
      * TODO: Replace this with a better premade implementation

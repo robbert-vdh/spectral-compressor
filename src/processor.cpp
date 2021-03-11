@@ -118,8 +118,6 @@ void SpectralCompressorProcessor::prepareToPlay(
 
     spectral_compressors.resize(fft_window_size, compressor);
 
-    first_iteration = true;
-
     // We use ring buffers to fill our FFT buffers
     ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
                         std::vector(fft_window_size, 0.0f));
@@ -183,7 +181,7 @@ void SpectralCompressorProcessor::processBlock(
         // processing
         // HACK: This only works because we can divide `fft_window_size` by our
         //       buffer size
-        if (current_ring_buffer_pos == 0 && !first_iteration) {
+        if (current_ring_buffer_pos == 0) {
             std::copy(ring_buffers[channel].begin(),
                       ring_buffers[channel].end(),
                       fft_scratch_buffer[channel].begin());
@@ -238,8 +236,6 @@ void SpectralCompressorProcessor::processBlock(
         buffer.copyFrom(channel, 0,
                         &fft_scratch_buffer[channel][current_ring_buffer_pos],
                         num_samples, 10.0f);
-
-        first_iteration = false;
     }
 }
 
