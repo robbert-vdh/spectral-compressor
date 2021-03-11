@@ -107,16 +107,34 @@ void SpectralCompressorProcessor::prepareToPlay(
     // TODO: Make the compressor settings configurable
     // TODO: These settings are also very extreme
     juce::dsp::Compressor<float> compressor{};
-    compressor.setThreshold(-20);
     compressor.setRatio(50.0);
-    compressor.setAttack(10);
-    compressor.setRelease(100);
+    // TODO: I don't think the attack and release times are correct with the way
+    //       we only sporadically use our compressors
+    compressor.setAttack(10.0);
+    compressor.setRelease(50.0);
     compressor.prepare(juce::dsp::ProcessSpec{
         .sampleRate = sampleRate,
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
     spectral_compressors.resize(fft_window_size, compressor);
+
+    // The thresholds are set to match pink noise.
+    constexpr float base_threshold_dbfs = 0.0f;
+    const float frequency_increment = sampleRate / fft_window_size;
+    for (size_t bin_idx = 0; bin_idx < spectral_compressors.size(); bin_idx++) {
+        const float frequency = frequency_increment * bin_idx;
+        // This starts at 1 for 0 Hz (DC)
+        const float octave = std::log2(frequency + 2);
+
+        // The 3 dB is to compensate for bin 0
+        const float threshold = (base_threshold_dbfs + 3.0f) - (3.0f * octave);
+        spectral_compressors[bin_idx].setThreshold(threshold);
+
+        std::cerr << "Bin " << bin_idx << ", frequency " << frequency
+                  << " Hz, octave " << octave << ", threshold " << threshold
+                  << " dBFS" << std::endl;
+    }
 
     // We use ring buffers to fill our FFT buffers
     ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
@@ -207,6 +225,14 @@ void SpectralCompressorProcessor::processBlock(
                 // We need to scale both components by the same value
                 const float compression_multiplier =
                     magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
+
+                // FIXME: Remove this after everything's A-Ok
+                if (!std::isnormal(compression_multiplier)) {
+                    std::cerr << "Skipping multiplier "
+                              << compression_multiplier << " @ " << channel
+                              << ":" << i << std::endl;
+                    continue;
+                }
 
                 fft_scratch_buffer[channel][i] *= compression_multiplier;
                 fft_scratch_buffer[channel][i + 1] *= compression_multiplier;
