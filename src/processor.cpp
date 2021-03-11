@@ -325,7 +325,8 @@ void SpectralCompressorProcessor::processBlock(
 
 //==============================================================================
 bool SpectralCompressorProcessor::hasEditor() const {
-    return true;
+    // TODO: Add an editor at some point
+    return false;
 }
 
 juce::AudioProcessorEditor* SpectralCompressorProcessor::createEditor() {
