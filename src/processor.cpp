@@ -208,7 +208,8 @@ void SpectralCompressorProcessor::processBlock(
 
                 // We need to scale both components by the same value
                 const float compression_multiplier =
-                    compressed_magnitude / magnitude;
+                    magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
+
                 fft_scratch_buffer[channel][i] *= compression_multiplier;
                 fft_scratch_buffer[channel][i + 1] *= compression_multiplier;
             }
