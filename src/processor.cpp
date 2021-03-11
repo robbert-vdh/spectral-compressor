@@ -212,7 +212,7 @@ void SpectralCompressorProcessor::processBlock(
                       fft_scratch_buffer[channel].begin());
 
             fft.performRealOnlyForwardTransform(
-                fft_scratch_buffer[channel].data(), true);
+                fft_scratch_buffer[channel].data());
 
             // We'll compress every FTT bin individually. Bin 0 is the DC offset
             // and should be skipped, and the latter half of the FFT bins should
@@ -265,11 +265,8 @@ void SpectralCompressorProcessor::processBlock(
                 }
             }
 
-            fft.performRealOnlyInverseTransform(
-                fft_scratch_buffer[channel].data());
-
             // FIXME: Remove this after everything's A-Ok
-            for (size_t i = 0; i < fft_scratch_buffer[channel].size(); i += 2) {
+            for (size_t i = 0; i < fft_scratch_buffer[channel].size(); i++) {
                 if (fft_scratch_buffer[channel][i] != 0 &&
                     !std::isnormal(fft_scratch_buffer[channel][i])) {
                     std::cerr << "Post-FFT non-normal "
@@ -298,6 +295,9 @@ void SpectralCompressorProcessor::processBlock(
                     fft_scratch_buffer[channel][i] = 0.0f;
                 }
             }
+
+            fft.performRealOnlyInverseTransform(
+                fft_scratch_buffer[channel].data());
 
             // TODO: Makeup gain
         }
