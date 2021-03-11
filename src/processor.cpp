@@ -222,7 +222,7 @@ void SpectralCompressorProcessor::processBlock(
             for (size_t compressor_idx = 0;
                  compressor_idx < spectral_compressors.size();
                  compressor_idx++) {
-                const size_t bin_idx = (compressor_idx * 2) + 1;
+                const size_t bin_idx = (compressor_idx * 2) + 2;
 
                 // The real and imaginary parts are interleaved, so ever bin
                 // spans two values in the scratch buffer
