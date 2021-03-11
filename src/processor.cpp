@@ -104,6 +104,9 @@ void SpectralCompressorProcessor::prepareToPlay(
                               std::vector(fft_window_size * 2, 0.0f));
 
     // Every FFT bin on both channels gets its own compressor, hooray!
+    // The `(fft_window_size / 2) - 1` is because the first bin is the DC offset
+    // and shouldn't be compressed, and the bins after the Nyquist frequency are
+    // the same as the first half but in reverse order.
     // TODO: Make the compressor settings configurable
     // TODO: These settings are also very extreme
     juce::dsp::Compressor<float> compressor{};
@@ -117,23 +120,27 @@ void SpectralCompressorProcessor::prepareToPlay(
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
-    spectral_compressors.resize(fft_window_size, compressor);
+    spectral_compressors.resize((fft_window_size / 2) - 1, compressor);
 
     // The thresholds are set to match pink noise.
     constexpr float base_threshold_dbfs = 0.0f;
     const float frequency_increment = sampleRate / fft_window_size;
-    for (size_t bin_idx = 0; bin_idx < spectral_compressors.size(); bin_idx++) {
+    for (size_t compressor_idx = 0;
+         compressor_idx < spectral_compressors.size(); compressor_idx++) {
+        // The first bin doesn't get a compressor
+        const size_t bin_idx = compressor_idx + 1;
         const float frequency = frequency_increment * bin_idx;
+
         // This starts at 1 for 0 Hz (DC)
         const float octave = std::log2(frequency + 2);
 
         // The 3 dB is to compensate for bin 0
         const float threshold = (base_threshold_dbfs + 3.0f) - (3.0f * octave);
-        spectral_compressors[bin_idx].setThreshold(threshold);
+        spectral_compressors[compressor_idx].setThreshold(threshold);
 
-        std::cerr << "Bin " << bin_idx << ", frequency " << frequency
-                  << " Hz, octave " << octave << ", threshold " << threshold
-                  << " dBFS" << std::endl;
+        std::cerr << "Compressor " << compressor_idx << ", frequency "
+                  << frequency << " Hz, octave " << octave << ", threshold "
+                  << threshold << " dBFS" << std::endl;
     }
 
     // We use ring buffers to fill our FFT buffers
@@ -207,22 +214,33 @@ void SpectralCompressorProcessor::processBlock(
             fft.performRealOnlyForwardTransform(
                 fft_scratch_buffer[channel].data(), true);
 
-            // We'll compress every FTT bin individually
-            for (size_t i = 0; i < fft_scratch_buffer[channel].size(); i += 2) {
-                // TODO: Or are these reversed? Doesn't really matter
-                const float real = fft_scratch_buffer[channel][i];
-                const float imag = fft_scratch_buffer[channel][i + 1];
-                const float magnitude =
-                    std::sqrt((real * real) + (imag * imag));
+            // We'll compress every FTT bin individually. Bin 0 is the DC offset
+            // and should be skipped, and the latter half of the FFT bins should
+            // be processed in the same way as the first half but in reverse
+            // order.
+            const size_t num_bins = fft_scratch_buffer[channel].size();
+            for (size_t compressor_idx = 0;
+                 compressor_idx < spectral_compressors.size();
+                 compressor_idx++) {
+                const size_t bin_idx = (compressor_idx * 2) + 1;
 
                 // The real and imaginary parts are interleaved, so ever bin
                 // spans two values in the scratch buffer
-                const size_t compressor_idx = i / 2;
+                // TODO: Or are these reversed? Doesn't really matter
+                // TODO: Are these _really_ exactly the same in the second half
+                //       ergo this single magnitude is sufficient?
+                const float real = fft_scratch_buffer[channel][bin_idx];
+                const float imag = fft_scratch_buffer[channel][bin_idx + 1];
+                const float magnitude =
+                    std::sqrt((real * real) + (imag * imag));
+
                 const float compressed_magnitude =
                     spectral_compressors[compressor_idx].processSample(
                         channel, magnitude);
 
-                // We need to scale both components by the same value
+                // We need to scale both the imaginary and real components of
+                // the bins at the start and end of the spectrum by the same
+                // value
                 const float compression_multiplier =
                     magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
 
@@ -230,16 +248,58 @@ void SpectralCompressorProcessor::processBlock(
                 if (!std::isnormal(compression_multiplier)) {
                     std::cerr << "Skipping multiplier "
                               << compression_multiplier << " @ " << channel
-                              << ":" << i << std::endl;
+                              << ":" << compressor_idx << std::endl;
                     continue;
                 }
 
-                fft_scratch_buffer[channel][i] *= compression_multiplier;
-                fft_scratch_buffer[channel][i + 1] *= compression_multiplier;
+                // The same operation should be applied to the mirrored bins at
+                // the end of the FFT window, except for if this is the last bin
+                fft_scratch_buffer[channel][bin_idx] *= compression_multiplier;
+                fft_scratch_buffer[channel][bin_idx + 1] *=
+                    compression_multiplier;
+                if (compressor_idx != spectral_compressors.size() - 1) {
+                    fft_scratch_buffer[channel][num_bins - bin_idx] *=
+                        compression_multiplier;
+                    fft_scratch_buffer[channel][num_bins - bin_idx + 1] *=
+                        compression_multiplier;
+                }
             }
 
             fft.performRealOnlyInverseTransform(
                 fft_scratch_buffer[channel].data());
+
+            // FIXME: Remove this after everything's A-Ok
+            for (size_t i = 0; i < fft_scratch_buffer[channel].size(); i += 2) {
+                if (fft_scratch_buffer[channel][i] != 0 &&
+                    !std::isnormal(fft_scratch_buffer[channel][i])) {
+                    std::cerr << "Post-FFT non-normal "
+                              << fft_scratch_buffer[channel][i] << " @ "
+                              << channel << ":" << i << std::endl;
+                    switch (std::fpclassify(fft_scratch_buffer[channel][i])) {
+                        case FP_INFINITE:
+                            std::cerr << "Inf" << std::endl;
+                            break;
+                        case FP_NAN:
+                            std::cerr << "NaN" << std::endl;
+                            break;
+                        case FP_NORMAL:
+                            std::cerr << "normal" << std::endl;
+                            break;
+                        case FP_SUBNORMAL:
+                            std::cerr << "subnormal" << std::endl;
+                            break;
+                        case FP_ZERO:
+                            std::cerr << "zero" << std::endl;
+                            break;
+                        default:
+                            std::cerr << "unknown" << std::endl;
+                            break;
+                    }
+                    fft_scratch_buffer[channel][i] = 0.0f;
+                }
+            }
+
+            // TODO: Makeup gain
         }
 
         // Copy the input audio into our ring buffer and increment the position
@@ -257,11 +317,9 @@ void SpectralCompressorProcessor::processBlock(
         // Everything uses the same ring buffer position.
         // TODO: This too of course only works when the buffer size is cleanly
         //       divisible by the FFT window size
-        // TODO: The gain multiplier is for makeup gain. This of course needs to
-        //       be dependent on the compressor settings
         buffer.copyFrom(channel, 0,
                         &fft_scratch_buffer[channel][current_ring_buffer_pos],
-                        num_samples, 10.0f);
+                        num_samples);
     }
 }
 

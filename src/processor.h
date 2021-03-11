@@ -71,11 +71,13 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     std::vector<std::vector<float>> fft_scratch_buffer;
 
     /**
-     * This will contain `fft_window_size` compressors. The compressors are
-     * already multichannel so we don't need a nested vector here. We'll
-     * compress the magnitude of every FFT bin (`sqrt(i^2 + r^2)`) individually,
-     * and then scale both the real and imaginary components by the ratio of
-     * their magnitude and the compressed value.
+     * This will contain `(fft_window_size / 2) - 1` compressors. The
+     * compressors are already multichannel so we don't need a nested vector
+     * here. We'll compress the magnitude of every FFT bin (`sqrt(i^2 + r^2)`)
+     * individually, and then scale both the real and imaginary components by
+     * the ratio of their magnitude and the compressed value. Bin 0 is the DC
+     * offset and the bins in the second half should be processed the same was
+     * as the bins in the first half but mirrored.
      */
     std::vector<juce::dsp::Compressor<float>> spectral_compressors;
 
