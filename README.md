@@ -10,3 +10,5 @@ This project builds a VST3 plugin using JUCE. You'll need [CMake 3.15 or higher]
 cmake -Bbuild -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
+
+You'll find the compiled plugin in `build/SpectralCompressor_artefacts/Release/VST3`.
