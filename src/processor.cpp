@@ -34,7 +34,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
 #endif
               ),
       fft(fft_order) {
-    setLatencySamples(4096);
+    setLatencySamples(fft_window_size);
 }
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
