@@ -116,8 +116,8 @@ void SpectralCompressorProcessor::prepareToPlay(
     // TODO: These settings are also very extreme
     juce::dsp::Compressor<float> compressor{};
     compressor.setRatio(50.0);
-    compressor.setAttack(10.0);
-    compressor.setRelease(50.0);
+    compressor.setAttack(50.0);
+    compressor.setRelease(5000.0);
     compressor.prepare(juce::dsp::ProcessSpec{
         // We only process everything once every `windowing_interval`, otherwise
         // our attack and release times will be all messed up
