@@ -35,7 +35,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
               ),
       windowing_function(
           fft_window_size,
-          juce::dsp::WindowingFunction<float>::WindowingMethod::hamming,
+          juce::dsp::WindowingFunction<float>::WindowingMethod::hann,
           // TODO: Or should we leave normalization enabled?
           false),
       fft(fft_order) {
