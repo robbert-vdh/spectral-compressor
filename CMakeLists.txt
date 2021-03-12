@@ -15,7 +15,7 @@ FetchContent_MakeAvailable(juce)
 juce_add_plugin(SpectralCompressor
   PRODUCT_NAME "Spectral Compressor"
   COMPANY_NAME "Robbert van der Helm"
-  FORMATS VST3
+  FORMATS VST3 AU
 
   PLUGIN_MANUFACTURER_CODE RvdH
   PLUGIN_CODE Spcc
