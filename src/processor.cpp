@@ -18,7 +18,7 @@
 
 #include "editor.h"
 
-// TODO: Rewrite, this is from the example
+#include <span>
 
 using juce::uint32;
 
@@ -220,11 +220,11 @@ void SpectralCompressorProcessor::processBlock(
             // order.
             // The real and imaginary parts are interleaved, so ever bin spans
             // two values in the scratch buffer. We can 'safely' do this cast so
-            // we can use the STL's complex value functions.  (while of course
-            // losing some safety provided by `std::vector`)
-            std::complex<float>* fft_buffer =
+            // we can use the STL's complex value functions.
+            std::span<std::complex<float>> fft_buffer(
                 reinterpret_cast<std::complex<float>*>(
-                    fft_scratch_buffer[channel].data());
+                    fft_scratch_buffer[channel].data()),
+                fft_window_size);
             for (size_t compressor_idx = 0;
                  compressor_idx < spectral_compressors.size();
                  compressor_idx++) {
