@@ -44,6 +44,7 @@ target_compile_definitions(SpectralCompressor PUBLIC
 
 # TODO: Fix static linking. With JUCE's default settings we dynamically link to
 #       a ton of stuff (and stuff that we don't even use).
+# TODO: Make sure that we're using FFTW
 
 target_link_libraries(SpectralCompressor PUBLIC
   juce::juce_recommended_warning_flags
