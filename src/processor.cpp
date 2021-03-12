@@ -277,14 +277,6 @@ void SpectralCompressorProcessor::processBlock(
                 const float compression_multiplier =
                     magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
 
-                // FIXME: Remove this after everything's A-Ok
-                if (!std::isnormal(compression_multiplier)) {
-                    std::cerr << "Skipping multiplier "
-                              << compression_multiplier << " @ " << channel
-                              << ":" << compressor_idx << std::endl;
-                    continue;
-                }
-
                 // The same operation should be applied to the mirrored bins at
                 // the end of the FFT window, except for if this is the last bin
                 fft_buffer[bin_idx] *= compression_multiplier;
@@ -292,37 +284,6 @@ void SpectralCompressorProcessor::processBlock(
                 if (compressor_idx != spectral_compressors.size() - 1) {
                     const size_t mirrored_bin_idx = fft_window_size - bin_idx;
                     fft_buffer[mirrored_bin_idx] *= compression_multiplier;
-                }
-            }
-
-            // FIXME: Remove this after everything's A-Ok
-            for (size_t i = 0; i < fft_scratch_buffer[channel].size(); i++) {
-                if (fft_scratch_buffer[channel][i] != 0 &&
-                    !std::isnormal(fft_scratch_buffer[channel][i])) {
-                    std::cerr << "Post-FFT non-normal "
-                              << fft_scratch_buffer[channel][i] << " @ "
-                              << channel << ":" << i << std::endl;
-                    switch (std::fpclassify(fft_scratch_buffer[channel][i])) {
-                        case FP_INFINITE:
-                            std::cerr << "Inf" << std::endl;
-                            break;
-                        case FP_NAN:
-                            std::cerr << "NaN" << std::endl;
-                            break;
-                        case FP_NORMAL:
-                            std::cerr << "normal" << std::endl;
-                            break;
-                        case FP_SUBNORMAL:
-                            std::cerr << "subnormal" << std::endl;
-                            break;
-                        case FP_ZERO:
-                            std::cerr << "zero" << std::endl;
-                            break;
-                        default:
-                            std::cerr << "unknown" << std::endl;
-                            break;
-                    }
-                    fft_scratch_buffer[channel][i] = 0.0f;
                 }
             }
 
