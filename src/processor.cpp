@@ -116,12 +116,12 @@ void SpectralCompressorProcessor::prepareToPlay(
     // TODO: These settings are also very extreme
     juce::dsp::Compressor<float> compressor{};
     compressor.setRatio(50.0);
-    // TODO: I don't think the attack and release times are correct with the way
-    //       we only sporadically use our compressors
     compressor.setAttack(10.0);
     compressor.setRelease(50.0);
     compressor.prepare(juce::dsp::ProcessSpec{
-        .sampleRate = sampleRate,
+        // We only process everything once every `windowing_interval`, otherwise
+        // our attack and release times will be all messed up
+        .sampleRate = sampleRate / windowing_interval,
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
