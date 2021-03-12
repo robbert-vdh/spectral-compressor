@@ -218,22 +218,22 @@ void SpectralCompressorProcessor::processBlock(
             // and should be skipped, and the latter half of the FFT bins should
             // be processed in the same way as the first half but in reverse
             // order.
-            const size_t num_bins = fft_scratch_buffer[channel].size();
+            // The real and imaginary parts are interleaved, so ever bin spans
+            // two values in the scratch buffer. We can 'safely' do this cast so
+            // we can use the STL's complex value functions.  (while of course
+            // losing some safety provided by `std::vector`)
+            std::complex<float>* fft_buffer =
+                reinterpret_cast<std::complex<float>*>(
+                    fft_scratch_buffer[channel].data());
             for (size_t compressor_idx = 0;
                  compressor_idx < spectral_compressors.size();
                  compressor_idx++) {
-                const size_t bin_idx = (compressor_idx * 2) + 2;
+                // We don't have a compressor for the first bin
+                const size_t bin_idx = compressor_idx + 1;
 
-                // The real and imaginary parts are interleaved, so ever bin
-                // spans two values in the scratch buffer
-                // TODO: Or are these reversed? Doesn't really matter
                 // TODO: Are these _really_ exactly the same in the second half
                 //       ergo this single magnitude is sufficient?
-                const float real = fft_scratch_buffer[channel][bin_idx];
-                const float imag = fft_scratch_buffer[channel][bin_idx + 1];
-                const float magnitude =
-                    std::sqrt((real * real) + (imag * imag));
-
+                const float magnitude = std::abs(fft_buffer[bin_idx]);
                 const float compressed_magnitude =
                     spectral_compressors[compressor_idx].processSample(
                         channel, magnitude);
@@ -254,14 +254,10 @@ void SpectralCompressorProcessor::processBlock(
 
                 // The same operation should be applied to the mirrored bins at
                 // the end of the FFT window, except for if this is the last bin
-                fft_scratch_buffer[channel][bin_idx] *= compression_multiplier;
-                fft_scratch_buffer[channel][bin_idx + 1] *=
-                    compression_multiplier;
+                fft_buffer[bin_idx] *= compression_multiplier;
                 if (compressor_idx != spectral_compressors.size() - 1) {
-                    fft_scratch_buffer[channel][num_bins - bin_idx] *=
-                        compression_multiplier;
-                    fft_scratch_buffer[channel][num_bins - bin_idx + 1] *=
-                        compression_multiplier;
+                    const size_t mirrored_bin_idx = fft_window_size - bin_idx;
+                    fft_buffer[mirrored_bin_idx] *= compression_multiplier;
                 }
             }
 
