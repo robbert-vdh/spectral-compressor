@@ -42,6 +42,9 @@ target_compile_definitions(SpectralCompressor PUBLIC
   # We're using the GPL
   JUCE_DISPLAY_SPLASH_SCREEN=0)
 
+# TODO: Fix static linking. With JUCE's default settings we dynamically link to
+#       a ton of stuff (and stuff that we don't even use).
+
 target_link_libraries(SpectralCompressor PUBLIC
   juce::juce_recommended_warning_flags
   juce::juce_recommended_lto_flags
