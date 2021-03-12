@@ -19,11 +19,24 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+/**
+ * The number of samples in our FFT window.
+ */
 constexpr int fft_window_size = 4096;
+/**
+ * `log2(fft_window_size)`, used to create the FFT processor.
+ */
 constexpr int fft_order = 12;
 
 static_assert(1 << fft_order == fft_window_size,
               "The FFT order and FFT window sizes don't match up");
+
+/**
+ * We'll have to process the input in overlapping windows and add the processed
+ * results to a resulting waveform. We'll use four times overlap, so every this
+ * many samples we'll do an FFT transformation.
+ */
+constexpr int windowing_interval = fft_window_size / 4;
 
 class SpectralCompressorProcessor : public juce::AudioProcessor {
    public:
@@ -59,7 +72,14 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void setStateInformation(const void* data, int sizeInBytes) override;
 
    private:
+    /**
+     * We'll process the signal with overlapping windows. See
+     * `input_ring_buffers` for more information on how we'll do this.
+     */
+    juce::dsp::WindowingFunction<float> windowing_function;
+
     juce::dsp::FFT fft;
+
     /**
      * We need a scratch buffer per channel that can contain `fft_window_size *
      * 2` samples.
@@ -82,11 +102,25 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     std::vector<juce::dsp::Compressor<float>> spectral_compressors;
 
     /**
-     * A ring buffer of size `fft_window_size` for every channel.
+     * A ring buffer of size `fft_window_size` for every channel. Every
+     * `windowing_interval` we'll copy the last `fft_window_size` samples to
+     * `fft_scratch_buffers` using a window function, process it, and then add
+     * the results to `output_ring_buffers`.
      *
      * TODO: Replace this with a better premade implementation
      */
-    std::vector<std::vector<float>> ring_buffers;
+    std::vector<std::vector<float>> input_ring_buffers;
+    /**
+     * The processed results as described in the docstring of
+     * `input_ring_buffers`. Samples from this buffer will be written to the
+     * output.
+     */
+    std::vector<std::vector<float>> output_ring_buffers;
+
+    /**
+     * For every channel, which position in `input_ring_buffers` and
+     * `output_ring_buffers` we're currently working on.
+     */
     std::vector<size_t> ring_buffer_pos;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
