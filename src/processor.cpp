@@ -225,16 +225,20 @@ void SpectralCompressorProcessor::processBlock(
         // HACK: This only works because we can divide `fft_window_size` by our
         //       buffer size
         if ((current_ring_buffer_pos % windowing_interval) == 0) {
-            std::copy(input_ring_buffers[channel].begin() +
-                          static_cast<int>(current_ring_buffer_pos),
-                      input_ring_buffers[channel].end(),
-                      fft_scratch_buffer[channel].begin());
-            if (current_ring_buffer_pos > 0) {
-                std::copy(input_ring_buffers[channel].begin(),
-                          input_ring_buffers[channel].begin() +
-                              static_cast<int>(current_ring_buffer_pos),
-                          fft_scratch_buffer[channel].begin() +
-                              static_cast<int>(current_ring_buffer_pos));
+            const size_t copy_input_samples = std::min(
+                static_cast<size_t>(fft_window_size),
+                input_ring_buffers[channel].size() - current_ring_buffer_pos);
+            const size_t remaining_input_samples =
+                fft_window_size - copy_input_samples;
+            std::copy_n(input_ring_buffers[channel].begin() +
+                            static_cast<int>(current_ring_buffer_pos),
+                        copy_input_samples,
+                        fft_scratch_buffer[channel].begin());
+            if (remaining_input_samples > 0) {
+                std::copy_n(input_ring_buffers[channel].begin(),
+                            remaining_input_samples,
+                            fft_scratch_buffer[channel].begin() +
+                                static_cast<int>(copy_input_samples));
             }
 
             windowing_function.multiplyWithWindowingTable(
@@ -284,6 +288,7 @@ void SpectralCompressorProcessor::processBlock(
                 // The same operation should be applied to the mirrored bins at
                 // the end of the FFT window, except for if this is the last bin
                 fft_buffer[bin_idx] *= compression_multiplier;
+                // TODO: Is this mirrored part necessary?
                 if (compressor_idx != spectral_compressors.size() - 1) {
                     const size_t mirrored_bin_idx = fft_window_size - bin_idx;
                     fft_buffer[mirrored_bin_idx] *= compression_multiplier;
@@ -323,26 +328,23 @@ void SpectralCompressorProcessor::processBlock(
 
             fft.performRealOnlyInverseTransform(
                 fft_scratch_buffer[channel].data());
-
-            // TODO: Makeup gain
-
-            // TODO: Do we need to repeat this? I have no idea how to math!
             windowing_function.multiplyWithWindowingTable(
                 fft_scratch_buffer[channel].data(),
                 fft_scratch_buffer[channel].size());
+
+            // TODO: Makeup gain
 
             // After processing the windowed data, we'll add it to our output
             // ring buffer.
             // TODO: We probably need to increase this buffer for more overlap?
             juce::FloatVectorOperations::add(
                 &output_ring_buffers[channel][current_ring_buffer_pos],
-                fft_scratch_buffer[channel].data(),
-                fft_window_size - current_ring_buffer_pos);
-            if (current_ring_buffer_pos > 0) {
+                fft_scratch_buffer[channel].data(), copy_input_samples);
+            if (remaining_input_samples > 0) {
                 juce::FloatVectorOperations::add(
                     &output_ring_buffers[channel][0],
-                    &fft_scratch_buffer[channel][current_ring_buffer_pos],
-                    current_ring_buffer_pos);
+                    &fft_scratch_buffer[channel][copy_input_samples],
+                    remaining_input_samples);
             }
         }
 
