@@ -154,17 +154,12 @@ void SpectralCompressorProcessor::prepareToPlay(
                   << threshold << " dBFS" << std::endl;
     }
 
-    // We use ring buffers to fill our FFT buffers and to write the results to
-    // after we process windows of the input. They need to be able to contain as
-    // many samples as we'll process with FFT plus an additional window so we
-    // can clear out our buffers.
-    // TODO: Do we need this extra capacity?
-    input_ring_buffers.resize(
-        static_cast<size_t>(getTotalNumInputChannels()),
-        std::vector(fft_window_size + windowing_interval, 0.0f));
-    output_ring_buffers.resize(
-        static_cast<size_t>(getTotalNumInputChannels()),
-        std::vector(fft_window_size + windowing_interval, 0.0f));
+    // We use ring buffers to store the samples we'll process using FFT and also
+    // to store the samples that should be played back to.
+    input_ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
+                              std::vector(fft_window_size, 0.0f));
+    output_ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
+                               std::vector(fft_window_size, 0.0f));
     ring_buffer_pos.resize(static_cast<size_t>(getTotalNumInputChannels()));
 }
 
@@ -210,138 +205,212 @@ void SpectralCompressorProcessor::processBlock(
         static_cast<size_t>(getTotalNumOutputChannels());
     const size_t num_samples = static_cast<size_t>(buffer.getNumSamples());
 
-    // FIXME: Since we're cutting some corners still this might only work at 512
-    //        or 1024 samples/buffer
-    jassert((windowing_interval % num_samples) == 0);
-
     // Zero out all unused channels
     for (auto i = input_channels; i < output_channels; i++) {
         buffer.clear(i, 0, buffer.getNumSamples());
     }
 
     // TODO: Add oversampling, potentially reduce latency
-    // TODO: Handle buffers that are smaller than our FFT window
-    // TODO: Handle buffers that are not a clean multiple of our FFT window
-    // TODO: First iteration should be skipped
+    // FIXME: Handling arbitrary buffer sizes almost works! But the latency
+    //        compensation is incorrect with buffer sizes that aren't a power of
+    //        2 >= 512, and odd sizes between 1024 and 2048 samples/buffer cause
+    //        segfaults or artifacts
     for (size_t channel = 0; channel < input_channels; channel++) {
-        const size_t current_ring_buffer_pos = ring_buffer_pos[channel];
+        // Since with large audio buffers we could be processing multiple
+        // windows in a single audio processing call, we'll increase this
+        // position as we process windows and write the resulting value back at
+        // the end of this loop
+        size_t current_ring_buffer_pos = ring_buffer_pos[channel];
 
-        // If our ring buffer got filled, then we can do another round of FFT
-        // processing
-        // HACK: This only works because we can divide `fft_window_size` by our
-        //       buffer size
-        if ((current_ring_buffer_pos % windowing_interval) == 0) {
-            const size_t copy_input_samples = std::min(
-                static_cast<size_t>(fft_window_size),
-                input_ring_buffers[channel].size() - current_ring_buffer_pos);
-            const size_t remaining_input_samples =
-                fft_window_size - copy_input_samples;
-            std::copy_n(input_ring_buffers[channel].begin() +
-                            static_cast<int>(current_ring_buffer_pos),
-                        copy_input_samples,
-                        fft_scratch_buffer[channel].begin());
-            if (remaining_input_samples > 0) {
-                std::copy_n(input_ring_buffers[channel].begin(),
-                            remaining_input_samples,
-                            fft_scratch_buffer[channel].begin() +
-                                static_cast<int>(copy_input_samples));
+        float* sample_buffer = buffer.getWritePointer(channel);
+
+        // We process incoming audio in windows of `windowing_interval`, and
+        // when using non-power of 2 buffer sizes of buffers that are smaller
+        // than `windowing_interval` it can happen that we have to copy over
+        // already processed audio before processing a new window
+        const size_t already_processed_samples =
+            current_ring_buffer_pos % windowing_interval;
+        const size_t samples_to_be_processed =
+            num_samples - already_processed_samples;
+        const int windows_to_process = std::ceil(
+            static_cast<float>(num_samples - already_processed_samples) /
+            windowing_interval);
+
+        // Copying from the input buffer to our input ring buffer, copying from
+        // our output ring buffer to the output buffer, and clearing the output
+        // buffer to prevent feedback is always done in sync
+        if (already_processed_samples > 0) {
+            // TODO: Improve naming for these things
+            const size_t copy_samples = std::min(
+                already_processed_samples,
+                output_ring_buffers[channel].size() - current_ring_buffer_pos);
+            const size_t remaining_samples =
+                already_processed_samples - copy_samples;
+            std::copy_n(sample_buffer, copy_samples,
+                        &input_ring_buffers[channel][current_ring_buffer_pos]);
+            std::copy_n(&output_ring_buffers[channel][current_ring_buffer_pos],
+                        copy_samples, sample_buffer);
+            // And clear out the part of the output buffer we just wrote, so we
+            // can write new processed windowed samples there
+            std::fill_n(&output_ring_buffers[channel][current_ring_buffer_pos],
+                        copy_samples, 0.0f);
+            if (remaining_samples > 0) {
+                std::copy_n(sample_buffer + copy_samples, remaining_samples,
+                            &input_ring_buffers[channel][0]);
+                std::copy_n(&output_ring_buffers[channel][0], remaining_samples,
+                            sample_buffer + copy_samples);
+                std::fill_n(&output_ring_buffers[channel][0], remaining_samples,
+                            0.0f);
             }
+        }
 
-            windowing_function.multiplyWithWindowingTable(
-                fft_scratch_buffer[channel].data(),
-                fft_scratch_buffer[channel].size());
-            fft.performRealOnlyForwardTransform(
-                fft_scratch_buffer[channel].data());
+        // Now if `windows_to_process > 0`, the current ring buffer position
+        // will align with a window and we can start doing our FFT magic
+        current_ring_buffer_pos += already_processed_samples;
+        for (int window_idx = 0; window_idx < windows_to_process;
+             window_idx++) {
+            // This is actual processing
+            {
+                const size_t copy_input_samples =
+                    std::min(static_cast<size_t>(fft_window_size),
+                             input_ring_buffers[channel].size() -
+                                 current_ring_buffer_pos);
+                const size_t remaining_input_samples =
+                    fft_window_size - copy_input_samples;
+                std::copy_n(input_ring_buffers[channel].begin() +
+                                static_cast<int>(current_ring_buffer_pos),
+                            copy_input_samples,
+                            fft_scratch_buffer[channel].begin());
+                if (remaining_input_samples > 0) {
+                    std::copy_n(input_ring_buffers[channel].begin(),
+                                remaining_input_samples,
+                                fft_scratch_buffer[channel].begin() +
+                                    static_cast<int>(copy_input_samples));
+                }
 
-            // We'll compress every FTT bin individually. Bin 0 is the DC offset
-            // and should be skipped, and the latter half of the FFT bins should
-            // be processed in the same way as the first half but in reverse
-            // order.
-            // The real and imaginary parts are interleaved, so ever bin spans
-            // two values in the scratch buffer. We can 'safely' do this cast so
-            // we can use the STL's complex value functions.
-            std::span<std::complex<float>> fft_buffer(
-                reinterpret_cast<std::complex<float>*>(
-                    fft_scratch_buffer[channel].data()),
-                fft_window_size);
-            for (size_t compressor_idx = 0;
-                 compressor_idx < spectral_compressors.size();
-                 compressor_idx++) {
-                // We don't have a compressor for the first bin
-                const size_t bin_idx = compressor_idx + 1;
+                windowing_function.multiplyWithWindowingTable(
+                    fft_scratch_buffer[channel].data(),
+                    fft_scratch_buffer[channel].size());
+                fft.performRealOnlyForwardTransform(
+                    fft_scratch_buffer[channel].data());
 
-                // TODO: Are these _really_ exactly the same in the second half
-                //       ergo this single magnitude is sufficient?
-                const float magnitude = std::abs(fft_buffer[bin_idx]);
-                const float compressed_magnitude =
-                    spectral_compressors[compressor_idx].processSample(
-                        channel, magnitude);
+                // We'll compress every FTT bin individually. Bin 0 is the DC
+                // offset and should be skipped, and the latter half of the FFT
+                // bins should be processed in the same way as the first half
+                // but in reverse order. The real and imaginary parts are
+                // interleaved, so ever bin spans two values in the scratch
+                // buffer. We can 'safely' do this cast so we can use the STL's
+                // complex value functions.
+                std::span<std::complex<float>> fft_buffer(
+                    reinterpret_cast<std::complex<float>*>(
+                        fft_scratch_buffer[channel].data()),
+                    fft_window_size);
+                for (size_t compressor_idx = 0;
+                     compressor_idx < spectral_compressors.size();
+                     compressor_idx++) {
+                    // We don't have a compressor for the first bin
+                    const size_t bin_idx = compressor_idx + 1;
 
-                // We need to scale both the imaginary and real components of
-                // the bins at the start and end of the spectrum by the same
-                // value
-                const float compression_multiplier =
-                    magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
+                    // TODO: Are these _really_ exactly the same in the second
+                    //       half ergo this single magnitude is sufficient?
+                    const float magnitude = std::abs(fft_buffer[bin_idx]);
+                    const float compressed_magnitude =
+                        spectral_compressors[compressor_idx].processSample(
+                            channel, magnitude);
 
-                // The same operation should be applied to the mirrored bins at
-                // the end of the FFT window, except for if this is the last bin
-                fft_buffer[bin_idx] *= compression_multiplier;
-                // TODO: Is this mirrored part necessary?
-                if (compressor_idx != spectral_compressors.size() - 1) {
-                    const size_t mirrored_bin_idx = fft_window_size - bin_idx;
-                    fft_buffer[mirrored_bin_idx] *= compression_multiplier;
+                    // We need to scale both the imaginary and real components
+                    // of the bins at the start and end of the spectrum by the
+                    // same value
+                    const float compression_multiplier =
+                        magnitude != 0.0f ? compressed_magnitude / magnitude
+                                          : 1.0f;
+
+                    // The same operation should be applied to the mirrored bins
+                    // at the end of the FFT window, except for if this is the
+                    // last bin
+                    fft_buffer[bin_idx] *= compression_multiplier;
+                    // TODO: Is this mirrored part necessary?
+                    if (compressor_idx != spectral_compressors.size() - 1) {
+                        const size_t mirrored_bin_idx =
+                            fft_window_size - bin_idx;
+                        fft_buffer[mirrored_bin_idx] *= compression_multiplier;
+                    }
+                }
+
+                // TODO: Should we also use this window function after
+                //       processing?
+                fft.performRealOnlyInverseTransform(
+                    fft_scratch_buffer[channel].data());
+                windowing_function.multiplyWithWindowingTable(
+                    fft_scratch_buffer[channel].data(),
+                    fft_scratch_buffer[channel].size());
+
+                // TODO: Makeup gain
+
+                // After processing the windowed data, we'll add it to our
+                // output ring buffer
+                juce::FloatVectorOperations::add(
+                    &output_ring_buffers[channel][current_ring_buffer_pos],
+                    fft_scratch_buffer[channel].data(), copy_input_samples);
+                if (remaining_input_samples > 0) {
+                    juce::FloatVectorOperations::add(
+                        &output_ring_buffers[channel][0],
+                        &fft_scratch_buffer[channel][copy_input_samples],
+                        remaining_input_samples);
                 }
             }
 
-            fft.performRealOnlyInverseTransform(
-                fft_scratch_buffer[channel].data());
-            windowing_function.multiplyWithWindowingTable(
-                fft_scratch_buffer[channel].data(),
-                fft_scratch_buffer[channel].size());
+            // Copy the input audio into our ring buffer and copy the processed
+            // audio into the output buffer
+            const size_t samples_to_process_this_iteration =
+                window_idx < (windows_to_process - 1)
+                    ? windowing_interval
+                    : static_cast<size_t>(
+                          static_cast<int>(samples_to_be_processed) -
+                          (windowing_interval * window_idx));
+            const size_t copy_samples = std::min(
+                samples_to_process_this_iteration,
+                output_ring_buffers[channel].size() - current_ring_buffer_pos);
+            const size_t remaining_samples =
+                samples_to_process_this_iteration - copy_samples;
+            // TODO: Maybe we should maintain the current offset in some
+            //       variable
+            std::copy_n(sample_buffer + already_processed_samples +
+                            (windowing_interval * window_idx),
+                        copy_samples,
+                        &input_ring_buffers[channel][current_ring_buffer_pos]);
+            std::copy_n(&output_ring_buffers[channel][current_ring_buffer_pos],
+                        copy_samples,
+                        sample_buffer + already_processed_samples +
+                            (windowing_interval * window_idx));
+            // And clear out the part of the output buffer we just wrote, so we
+            // can write new processed windowed samples there
+            std::fill_n(&output_ring_buffers[channel][current_ring_buffer_pos],
+                        copy_samples, 0.0f);
+            if (remaining_samples > 0) {
+                std::copy_n(sample_buffer + already_processed_samples +
+                                (windowing_interval * window_idx) +
+                                copy_samples,
+                            remaining_samples, &input_ring_buffers[channel][0]);
+                std::copy_n(&output_ring_buffers[channel][0], remaining_samples,
+                            sample_buffer + already_processed_samples +
+                                (windowing_interval * window_idx) +
+                                copy_samples);
+                std::fill_n(&output_ring_buffers[channel][0], remaining_samples,
+                            0.0f);
+            }
 
-            // TODO: Makeup gain
-
-            // After processing the windowed data, we'll add it to our output
-            // ring buffer.
-            // TODO: We probably need to increase this buffer for more overlap?
-            juce::FloatVectorOperations::add(
-                &output_ring_buffers[channel][current_ring_buffer_pos],
-                fft_scratch_buffer[channel].data(), copy_input_samples);
-            if (remaining_input_samples > 0) {
-                juce::FloatVectorOperations::add(
-                    &output_ring_buffers[channel][0],
-                    &fft_scratch_buffer[channel][copy_input_samples],
-                    remaining_input_samples);
+            // Depending on whether this is the last iteration and the audio
+            // buffer settings, this can either leave us at the next windowing
+            // interval or somewhere inbetween windows
+            current_ring_buffer_pos += samples_to_process_this_iteration;
+            if (current_ring_buffer_pos >= input_ring_buffers[channel].size()) {
+                current_ring_buffer_pos -= input_ring_buffers[channel].size();
             }
         }
 
-        // Copy the input audio into our ring buffer and increment the position
-        // (we can do this because we already store this iteration's position)
-        // FIXME: This is of course only safe because of the assertion at the
-        //        start of the function! Otherwise we might have to split this
-        //        up.
-        float* input_samples = buffer.getWritePointer(channel);
-        std::copy_n(input_samples, num_samples,
-                    &input_ring_buffers[channel][current_ring_buffer_pos]);
-        ring_buffer_pos[channel] += num_samples;
-        if (ring_buffer_pos[channel] >= input_ring_buffers[channel].size()) {
-            // TODO: This too of course only works when things divide cleanly!
-            ring_buffer_pos[channel] = 0;
-        }
-
-        // Copy over the audio from the previous the added processed windows
-        // TODO: This too of course only works when the buffer size is cleanly
-        //       divisible by the FFT window size
-        buffer.copyFrom(channel, 0,
-                        &output_ring_buffers[channel][current_ring_buffer_pos],
-                        num_samples);
-
-        // Clear out the part of the output buffer we just output, so we can
-        // write new processed windowed samples there
-        // TODO: Where should we clear this out? It kind of makes sense to clear
-        //       out this window of the output buffer just after outputting it
-        std::fill_n(&output_ring_buffers[channel][current_ring_buffer_pos],
-                    num_samples, 0.0f);
+        // As mentioned at the start of the loop
+        ring_buffer_pos[channel] = current_ring_buffer_pos;
     }
 }
 
