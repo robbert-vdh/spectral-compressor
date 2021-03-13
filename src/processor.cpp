@@ -114,6 +114,12 @@ void SpectralCompressorProcessor::prepareToPlay(
     // the same as the first half but in reverse order.
     // TODO: Make the compressor settings configurable
     // TODO: These settings are also very extreme
+    // TODO: The user should be able to configure their own slope (or free
+    //       drawn)
+    // TODO: Setting the thresholds based on a sidechain signal would be super
+    //       cool
+    // TODO: And we should be doing both upwards and downwards compression,
+    //       OTT-style
     juce::dsp::Compressor<float> compressor{};
     compressor.setRatio(50.0);
     compressor.setAttack(50.0);
