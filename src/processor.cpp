@@ -148,10 +148,6 @@ void SpectralCompressorProcessor::prepareToPlay(
         // The 3 dB is to compensate for bin 0
         const float threshold = (base_threshold_dbfs + 3.0f) - (3.0f * octave);
         spectral_compressors[compressor_idx].setThreshold(threshold);
-
-        std::cerr << "Compressor " << compressor_idx << ", frequency "
-                  << frequency << " Hz, octave " << octave << ", threshold "
-                  << threshold << " dBFS" << std::endl;
     }
 
     // We use ring buffers to store the samples we'll process using FFT and also
