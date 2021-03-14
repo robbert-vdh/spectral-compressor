@@ -163,6 +163,34 @@ class RingBuffer {
     }
 
     /**
+     * Copy `num` samples from `src` to the ring buffer, starting at `pos()`.
+     * This is only used when the plugin is bypassed to maintain the proper
+     * latency.
+     *
+     * This does not advance the current position.
+     *
+     * @param src The buffer to copy from.
+     * @param num How many elements to read, should not exceed `size()`.
+     *
+     * @return The number of elements copied.
+     *
+     * @throw std::invalid_argument When `num > size()`.
+     */
+    size_t read_n_from_in_place(const T* src, size_t num) {
+        if (num > buffer.size()) {
+            throw std::invalid_argument(
+                "num > size() in RingBuffer::copy_n_to()");
+        }
+
+        const auto& [num_to_end, num_from_start] =
+            split_range_from(current_pos, num);
+        std::copy_n(src, num_to_end, &buffer[current_pos]);
+        std::copy_n(src + num_to_end, num_from_start, &buffer[0]);
+
+        return num;
+    }
+
+    /**
      * Copy the _last_ `num` samples (going backwards at `pos()`) written to
      * this ring buffer to `dst`. In our case we'll likely read the entire ring
      * buffer at once (i.e. `num == size()`).

@@ -44,7 +44,6 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
 
-//==============================================================================
 const juce::String SpectralCompressorProcessor::getName() const {
     return JucePlugin_Name;
 }
@@ -133,6 +132,8 @@ void SpectralCompressorProcessor::prepareToPlay(
     spectral_compressors.resize((fft_window_size / 2) - 1, compressor);
 
     // The thresholds are set to match pink noise.
+    // TODO: Change the calculations so that the base threshold parameter is
+    //       centered around some frequency
     constexpr float base_threshold_dbfs = 0.0f;
     const float frequency_increment = sampleRate / fft_window_size;
     for (size_t compressor_idx = 0;
@@ -190,20 +191,58 @@ bool SpectralCompressorProcessor::isBusesLayoutSupported(
 #endif
 }
 
+void SpectralCompressorProcessor::processBlockBypassed(
+    juce::AudioBuffer<float>& buffer,
+    juce::MidiBuffer& /*midiMessages*/) {
+    // We need to maintain the same latency when bypassed, so we'll reuse most
+    // of the processing logic
+    process(buffer, true);
+}
+
 void SpectralCompressorProcessor::processBlock(
     juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer& /*midiMessages*/) {
+    process(buffer, false);
+}
+
+bool SpectralCompressorProcessor::hasEditor() const {
+    // TODO: Add an editor at some point
+    return false;
+}
+
+juce::AudioProcessorEditor* SpectralCompressorProcessor::createEditor() {
+    return new SpectralCompressorEditor(*this);
+}
+
+void SpectralCompressorProcessor::getStateInformation(
+    juce::MemoryBlock& /*destData*/) {
+    // You should use this method to store your parameters in the memory block.
+    // You could do that either as raw data, or use the XML or ValueTree classes
+    // as intermediaries to make it easy to save and load complex data.
+    // TODO: See above
+}
+
+void SpectralCompressorProcessor::setStateInformation(const void* /*data*/,
+                                                      int /*sizeInBytes*/) {
+    // You should use this method to restore your parameters from this memory
+    // block, whose contents will have been created by the getStateInformation()
+    // call.
+    // TODO: Same
+}
+
+void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
+                                          bool bypassed) {
     juce::ScopedNoDenormals noDenormals;
 
     const size_t input_channels =
-        static_cast<size_t>(getTotalNumInputChannels());
+        static_cast<size_t>(getMainBusNumInputChannels());
     const size_t output_channels =
         static_cast<size_t>(getTotalNumOutputChannels());
     const size_t num_samples = static_cast<size_t>(buffer.getNumSamples());
 
     // Zero out all unused channels
-    for (auto i = input_channels; i < output_channels; i++) {
-        buffer.clear(i, 0, buffer.getNumSamples());
+    for (auto channel = input_channels; channel < output_channels; channel++) {
+        buffer.clear(channel, 0.0f, num_samples);
     }
 
     // TODO: Add oversampling, potentially reduce latency
@@ -244,7 +283,7 @@ void SpectralCompressorProcessor::processBlock(
         for (int window_idx = 0; window_idx < windows_to_process;
              window_idx++) {
             // This is actual processing
-            {
+            if (!bypassed) {
                 input_ring_buffers[channel].copy_last_n_to(
                     fft_scratch_buffer.data(), fft_window_size);
 
@@ -311,6 +350,16 @@ void SpectralCompressorProcessor::processBlock(
                 // output ring buffer
                 output_ring_buffers[channel].add_n_from_in_place(
                     fft_scratch_buffer.data(), fft_window_size);
+            } else {
+                // We don't have a way to directly copy between buffers, but
+                // most hosts should not actually hit this bypassed state
+                // anyways
+                // TODO: At some point, do implement this without using the
+                //       scratch buffer
+                input_ring_buffers[channel].copy_last_n_to(
+                    fft_scratch_buffer.data(), fft_window_size);
+                output_ring_buffers[channel].read_n_from_in_place(
+                    fft_scratch_buffer.data(), fft_window_size);
             }
 
             // Copy the input audio into our ring buffer and copy the processed
@@ -328,33 +377,6 @@ void SpectralCompressorProcessor::processBlock(
 
         jassert(sample_buffer_offset == num_samples);
     }
-}
-
-//==============================================================================
-bool SpectralCompressorProcessor::hasEditor() const {
-    // TODO: Add an editor at some point
-    return false;
-}
-
-juce::AudioProcessorEditor* SpectralCompressorProcessor::createEditor() {
-    return new SpectralCompressorEditor(*this);
-}
-
-//==============================================================================
-void SpectralCompressorProcessor::getStateInformation(
-    juce::MemoryBlock& /*destData*/) {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
-    // TODO: See above
-}
-
-void SpectralCompressorProcessor::setStateInformation(const void* /*data*/,
-                                                      int /*sizeInBytes*/) {
-    // You should use this method to restore your parameters from this memory
-    // block, whose contents will have been created by the getStateInformation()
-    // call.
-    // TODO: Same
 }
 
 //==============================================================================

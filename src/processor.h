@@ -51,6 +51,9 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
 
+    void processBlockBypassed(juce::AudioBuffer<float>& buffer,
+                              juce::MidiBuffer& midiMessages) override;
+    using AudioProcessor::processBlockBypassed;
     void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using AudioProcessor::processBlock;
 
@@ -74,6 +77,13 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void setStateInformation(const void* data, int sizeInBytes) override;
 
    private:
+    /**
+     * Process audio. When the plugin is bypassed we should still compensate for
+     * the altency, so if `bypassed` is true we handle audio the exact same way
+     * as usual but with all actual processing disabled.
+     */
+    void process(juce::AudioBuffer<float>& buffer, bool bypassed);
+
     /**
      * We'll process the signal with overlapping windows. See
      * `input_ring_buffers` for more information on how we'll do this.
