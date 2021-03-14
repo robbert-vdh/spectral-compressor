@@ -10,6 +10,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(juce)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-fdiagnostics-color=always)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  add_compile_options(-fcolor-diagnostics)
+endif()
+
 # We only expose a single VST3 plugin
 
 juce_add_plugin(SpectralCompressor
