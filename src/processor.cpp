@@ -26,13 +26,9 @@ using juce::uint32;
 SpectralCompressorProcessor::SpectralCompressorProcessor()
     : AudioProcessor(
           BusesProperties()
-#if !JucePlugin_IsMidiEffect
-#if !JucePlugin_IsSynth
               .withInput("Input", juce::AudioChannelSet::stereo(), true)
-#endif
               .withOutput("Output", juce::AudioChannelSet::stereo(), true)
-#endif
-              ),
+              .withInput("Sidechain", juce::AudioChannelSet::stereo(), true)),
       windowing_function(
           fft_window_size,
           juce::dsp::WindowingFunction<float>::WindowingMethod::hann,
@@ -162,10 +158,11 @@ void SpectralCompressorProcessor::prepareToPlay(
 
     // We use ring buffers to store the samples we'll process using FFT and also
     // to store the samples that should be played back to.
-    input_ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
+    input_ring_buffers.resize(static_cast<size_t>(getMainBusNumInputChannels()),
                               RingBuffer<float>(fft_window_size));
-    output_ring_buffers.resize(static_cast<size_t>(getTotalNumInputChannels()),
-                               RingBuffer<float>(fft_window_size));
+    output_ring_buffers.resize(
+        static_cast<size_t>(getMainBusNumOutputChannels()),
+        RingBuffer<float>(fft_window_size));
 }
 
 void SpectralCompressorProcessor::releaseResources() {
@@ -180,25 +177,11 @@ void SpectralCompressorProcessor::releaseResources() {
 
 bool SpectralCompressorProcessor::isBusesLayoutSupported(
     const BusesLayout& layouts) const {
-#if JucePlugin_IsMidiEffect
-    juce::ignoreUnused(layouts);
-    return true;
-#else
-    // TODO: Why does the example not make whether the input layout is mono or
-    //       stereo?
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
-        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()) {
-        return false;
-    }
-
-#if !JucePlugin_IsSynth
-    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet()) {
-        return false;
-    }
-#endif
-
-    return true;
-#endif
+    // We can support any number of channels, as long as the main input, main
+    // output, and sidechain input have the same number of channels
+    return (layouts.getMainInputChannelSet() ==
+            layouts.getMainOutputChannelSet()) &&
+           (layouts.getChannelSet(true, 1) == layouts.getMainInputChannelSet());
 }
 
 void SpectralCompressorProcessor::processBlockBypassed(
@@ -246,7 +229,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     const size_t input_channels =
         static_cast<size_t>(getMainBusNumInputChannels());
     const size_t output_channels =
-        static_cast<size_t>(getTotalNumOutputChannels());
+        static_cast<size_t>(getMainBusNumOutputChannels());
     const size_t num_samples = static_cast<size_t>(buffer.getNumSamples());
 
     // Zero out all unused channels
