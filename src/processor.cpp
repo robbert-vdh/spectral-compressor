@@ -345,7 +345,9 @@ void SpectralCompressorProcessor::processBlock(
                     fft_scratch_buffer[channel].data(),
                     fft_scratch_buffer[channel].size());
 
-                // TODO: Makeup gain
+                // TODO: Makeup gain, and when implementing this, take into
+                //       account that the 4x overlap also multiplies the volume
+                //       by 4 so we should subtrace 6 dB from the makeup gain
 
                 // After processing the windowed data, we'll add it to our
                 // output ring buffer
