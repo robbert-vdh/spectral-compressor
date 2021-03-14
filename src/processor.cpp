@@ -181,10 +181,12 @@ bool SpectralCompressorProcessor::isBusesLayoutSupported(
     const BusesLayout& layouts) const {
     // We can support any number of channels, as long as the main input, main
     // output, and sidechain input have the same number of channels
-    // TODO: Should we account for busses being disabled? When does this happen?
+    const juce::AudioChannelSet sidechain_channel_set =
+        layouts.getChannelSet(true, 1);
     return (layouts.getMainInputChannelSet() ==
             layouts.getMainOutputChannelSet()) &&
-           (layouts.getChannelSet(true, 1) == layouts.getMainInputChannelSet());
+           (sidechain_channel_set == layouts.getMainInputChannelSet()) &&
+           !layouts.getMainInputChannelSet().isDisabled();
 }
 
 void SpectralCompressorProcessor::processBlockBypassed(
