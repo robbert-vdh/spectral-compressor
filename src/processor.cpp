@@ -120,8 +120,6 @@ void SpectralCompressorProcessor::prepareToPlay(
     // TODO: These settings are also very extreme
     // TODO: The user should be able to configure their own slope (or free
     //       drawn)
-    // TODO: Setting the thresholds based on a sidechain signal would be super
-    //       cool
     // TODO: And we should be doing both upwards and downwards compression,
     //       OTT-style
     juce::dsp::Compressor<float> compressor{};
@@ -163,6 +161,9 @@ void SpectralCompressorProcessor::prepareToPlay(
     output_ring_buffers.resize(
         static_cast<size_t>(getMainBusNumOutputChannels()),
         RingBuffer<float>(fft_window_size));
+    sidechain_ring_buffers.resize(
+        static_cast<size_t>(getChannelCountOfBus(true, 1)),
+        RingBuffer<float>(fft_window_size));
 }
 
 void SpectralCompressorProcessor::releaseResources() {
@@ -173,12 +174,14 @@ void SpectralCompressorProcessor::releaseResources() {
     spectral_compressors.clear();
     input_ring_buffers.clear();
     output_ring_buffers.clear();
+    sidechain_ring_buffers.clear();
 }
 
 bool SpectralCompressorProcessor::isBusesLayoutSupported(
     const BusesLayout& layouts) const {
     // We can support any number of channels, as long as the main input, main
     // output, and sidechain input have the same number of channels
+    // TODO: Should we account for busses being disabled? When does this happen?
     return (layouts.getMainInputChannelSet() ==
             layouts.getMainOutputChannelSet()) &&
            (layouts.getChannelSet(true, 1) == layouts.getMainInputChannelSet());
@@ -226,6 +229,9 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                                           bool bypassed) {
     juce::ScopedNoDenormals noDenormals;
 
+    juce::AudioBuffer<float> main_io = getBusBuffer(buffer, true, 0);
+    juce::AudioBuffer<float> sidechain_io = getBusBuffer(buffer, true, 1);
+
     const size_t input_channels =
         static_cast<size_t>(getMainBusNumInputChannels());
     const size_t output_channels =
@@ -242,8 +248,10 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
         // The sample buffer contains input audio and anything written to it
         // will be passed to the host. We'll keep track of the current offset in
         // the sample buffer since we'll be reading and writing in chunks.
-        float* sample_buffer = buffer.getWritePointer(channel);
+        float* sample_buffer = main_io.getWritePointer(channel);
         size_t sample_buffer_offset = 0;
+
+        const float* sidechain_buffer = sidechain_io.getReadPointer(channel);
 
         // We process incoming audio in windows of `windowing_interval`, and
         // when using non-power of 2 buffer sizes of buffers that are smaller
@@ -267,6 +275,11 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                                                     already_processed_samples);
             output_ring_buffers[channel].copy_n_to(
                 sample_buffer, already_processed_samples, true);
+            if (sidechain_active) {
+                sidechain_ring_buffers[channel].read_n_from(
+                    sidechain_buffer, already_processed_samples);
+            }
+
             sample_buffer_offset += already_processed_samples;
         }
 
@@ -364,6 +377,12 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
             output_ring_buffers[channel].copy_n_to(
                 sample_buffer + sample_buffer_offset,
                 samples_to_process_this_iteration, true);
+            if (sidechain_active) {
+                sidechain_ring_buffers[channel].read_n_from(
+                    sidechain_buffer + sample_buffer_offset,
+                    samples_to_process_this_iteration);
+            }
+
             sample_buffer_offset += samples_to_process_this_iteration;
         }
 

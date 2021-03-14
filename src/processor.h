@@ -125,6 +125,13 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * output.
      */
     std::vector<RingBuffer<float>> output_ring_buffers;
+    /**
+     * These ring buffers are identical to `input_ring_buffers`, but with data
+     * from the sidechain input. When sidechaining is enabled, we set the
+     * compressor thresholds based on the magnitudes from the same FFT analysis
+     * applied to the sidechain input.
+     */
+    std::vector<RingBuffer<float>> sidechain_ring_buffers;
 
     juce::AudioProcessorValueTreeState parameters;
     juce::AudioParameterBool& sidechain_active;
