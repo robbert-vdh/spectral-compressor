@@ -38,7 +38,17 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           juce::dsp::WindowingFunction<float>::WindowingMethod::hann,
           // TODO: Or should we leave normalization enabled?
           false),
-      fft(fft_order) {
+      fft(fft_order),
+      parameters(*this,
+                 nullptr,
+                 "parameters",
+                 {std::make_unique<juce::AudioParameterBool>("sidechain_active",
+                                                             "Sidechain Active",
+                                                             false)}),
+      // TODO: Is this how you're supposed to retrieve non-float parameters?
+      //       Seems a bit excessive
+      sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters.getParameter("sidechain_active"))) {
     setLatencySamples(fft_window_size);
 }
 
@@ -215,19 +225,18 @@ juce::AudioProcessorEditor* SpectralCompressorProcessor::createEditor() {
 }
 
 void SpectralCompressorProcessor::getStateInformation(
-    juce::MemoryBlock& /*destData*/) {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
-    // TODO: See above
+    juce::MemoryBlock& destData) {
+    const std::unique_ptr<juce::XmlElement> xml =
+        parameters.copyState().createXml();
+    copyXmlToBinary(*xml, destData);
 }
 
-void SpectralCompressorProcessor::setStateInformation(const void* /*data*/,
-                                                      int /*sizeInBytes*/) {
-    // You should use this method to restore your parameters from this memory
-    // block, whose contents will have been created by the getStateInformation()
-    // call.
-    // TODO: Same
+void SpectralCompressorProcessor::setStateInformation(const void* data,
+                                                      int sizeInBytes) {
+    const auto xml = getXmlFromBinary(data, sizeInBytes);
+    if (xml && xml->hasTagName(parameters.state.getType())) {
+        parameters.replaceState(juce::ValueTree::fromXml(*xml));
+    }
 }
 
 void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,

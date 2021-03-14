@@ -126,5 +126,8 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     std::vector<RingBuffer<float>> output_ring_buffers;
 
+    juce::AudioProcessorValueTreeState parameters;
+    juce::AudioParameterBool& sidechain_active;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };
