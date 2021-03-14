@@ -2,6 +2,19 @@ cmake_minimum_required(VERSION 3.15)
 
 project(spectral_compressor VERSION 0.0.1 LANGUAGES CXX)
 
+# During development you'll probably want to add
+# `-DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DJUCE_ENABLE_MODULE_SOURCE_GROUPS=1`
+# to the CMake command line
+set_property(GLOBAL PROPERTY USE_FOLDERS YES)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-fdiagnostics-color=always)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  add_compile_options(-fcolor-diagnostics)
+endif()
+
+# Fetch JUCE and other dependencies
+
 include(FetchContent)
 FetchContent_Declare(
   JUCE
@@ -9,12 +22,6 @@ FetchContent_Declare(
   GIT_TAG        6.0.7
 )
 FetchContent_MakeAvailable(juce)
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  add_compile_options(-fdiagnostics-color=always)
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  add_compile_options(-fcolor-diagnostics)
-endif()
 
 # We only expose a single VST3 plugin
 
