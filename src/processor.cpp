@@ -291,9 +291,39 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
              window_idx++) {
             // This is actual processing
             if (!bypassed) {
+                // If sidechaining is active, we set the compressor thresholds
+                // based on a sidechain signal. Since compression is already
+                // ballistics based we don't need any additional smoothing here.
+                // TODO: When sidechaining has just been disabled, all
+                //       compressor thresholds should be reset. We can probably
+                //       do this together with the threshold updating just
+                //       before we compress a magnitude.
+                if (sidechain_active) {
+                    sidechain_ring_buffers[channel].copy_last_n_to(
+                        fft_scratch_buffer.data(), fft_window_size);
+                    windowing_function.multiplyWithWindowingTable(
+                        fft_scratch_buffer.data(), fft_scratch_buffer.size());
+                    // TODO: We can skip negative frequencies here, right?
+                    fft.performRealOnlyForwardTransform(
+                        fft_scratch_buffer.data(), true);
+
+                    // The version below is better annotated
+                    std::span<std::complex<float>> fft_buffer(
+                        reinterpret_cast<std::complex<float>*>(
+                            fft_scratch_buffer.data()),
+                        fft_window_size);
+                    for (size_t compressor_idx = 0;
+                         compressor_idx < spectral_compressors.size();
+                         compressor_idx++) {
+                        const size_t bin_idx = compressor_idx + 1;
+                        const float magnitude = std::abs(fft_buffer[bin_idx]);
+                        spectral_compressors[compressor_idx].setThreshold(
+                            magnitude);
+                    }
+                }
+
                 input_ring_buffers[channel].copy_last_n_to(
                     fft_scratch_buffer.data(), fft_window_size);
-
                 windowing_function.multiplyWithWindowingTable(
                     fft_scratch_buffer.data(), fft_scratch_buffer.size());
                 fft.performRealOnlyForwardTransform(fft_scratch_buffer.data());
@@ -341,11 +371,9 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                     }
                 }
 
-                // TODO: Should we also use this window function after
+                // TODO: Should we also use the window function after
                 //       processing?
                 fft.performRealOnlyInverseTransform(fft_scratch_buffer.data());
-                windowing_function.multiplyWithWindowingTable(
-                    fft_scratch_buffer.data(), fft_scratch_buffer.size());
 
                 // TODO: Makeup gain, and when implementing this, take into
                 //       account that the 4x overlap also multiplies the volume
