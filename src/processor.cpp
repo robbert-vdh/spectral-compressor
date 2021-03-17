@@ -302,7 +302,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                     sidechain_ring_buffers[channel].copy_last_n_to(
                         fft_scratch_buffer.data(), fft_window_size);
                     windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_scratch_buffer.size());
+                        fft_scratch_buffer.data(), fft_window_size);
                     // TODO: We can skip negative frequencies here, right?
                     fft.performRealOnlyForwardTransform(
                         fft_scratch_buffer.data(), true);
@@ -325,7 +325,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 input_ring_buffers[channel].copy_last_n_to(
                     fft_scratch_buffer.data(), fft_window_size);
                 windowing_function.multiplyWithWindowingTable(
-                    fft_scratch_buffer.data(), fft_scratch_buffer.size());
+                    fft_scratch_buffer.data(), fft_window_size);
                 fft.performRealOnlyForwardTransform(fft_scratch_buffer.data());
 
                 // We'll compress every FTT bin individually. Bin 0 is the DC
