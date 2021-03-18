@@ -15,13 +15,8 @@ endif()
 
 # Fetch JUCE and other dependencies
 
-include(FetchContent)
-FetchContent_Declare(
-  JUCE
-  GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-  GIT_TAG        6.0.7
-)
-FetchContent_MakeAvailable(juce)
+include(cmake/CPM.cmake)
+CPMAddPackage("gh:juce-framework/JUCE#6.0.7")
 
 # We only expose a single VST3 plugin
 
