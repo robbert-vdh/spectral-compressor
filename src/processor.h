@@ -90,16 +90,17 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     juce::dsp::WindowingFunction<float> windowing_function;
 
+    /**
+     * The FFT processor.
+     */
     juce::dsp::FFT fft;
 
     /**
-     * We need a scratch buffer that can contain `fft_window_size * 2` samples.
-     *
-     * TODO: For this and a few other things we're using vectors instead of
-     *       `std::array<>` right now because the FFT sizes should be
-     *       configurable by the user at some point.
+     * We need a scratch buffer that can contain `fft_window_size * 2` samples
+     * for every channel. Because of the oversampling we have to process all
+     * channels in lockstep.
      */
-    std::vector<float> fft_scratch_buffer;
+    juce::AudioBuffer<float> fft_scratch_buffer;
 
     /**
      * This will contain `(fft_window_size / 2) - 1` compressors. The

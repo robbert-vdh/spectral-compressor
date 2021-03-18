@@ -110,7 +110,10 @@ void SpectralCompressorProcessor::prepareToPlay(
 
     // JUCE's FFT class interleaves the real and imaginary numbers, so this
     // buffer should be twice the window size in size
-    fft_scratch_buffer.resize(fft_window_size * 2, 0.0f);
+    // TODO: We technically only need one channel here so we can optimize a bit
+    //       later
+    fft_scratch_buffer.setSize(getMainBusNumInputChannels(),
+                               fft_window_size * 2, false, true, false);
 
     // Every FFT bin on both channels gets its own compressor, hooray!
     // The `(fft_window_size / 2) - 1` is because the first bin is the DC offset
@@ -170,7 +173,7 @@ void SpectralCompressorProcessor::releaseResources() {
     // TODO: Clearing a vector actually doesn't really do anything. So either
     //       don't do anything here or actually swap these vectors with new
     //       vectors/shrink to fit.
-    fft_scratch_buffer.clear();
+    fft_scratch_buffer.setSize(0, 0);
     spectral_compressors.clear();
     input_ring_buffers.clear();
     output_ring_buffers.clear();
@@ -245,73 +248,81 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
         buffer.clear(channel, 0.0f, num_samples);
     }
 
-    // TODO: Add oversampling, potentially reduce latency
-    for (size_t channel = 0; channel < input_channels; channel++) {
-        // The sample buffer contains input audio and anything written to it
-        // will be passed to the host. We'll keep track of the current offset in
-        // the sample buffer since we'll be reading and writing in chunks.
-        float* sample_buffer = main_io.getWritePointer(channel);
-        size_t sample_buffer_offset = 0;
+    // We'll process audio in lockstep to make it easier to use processors that
+    // require lookahead and thus induce latency
 
-        const float* sidechain_buffer = sidechain_io.getReadPointer(channel);
+    // We process incoming audio in windows of `windowing_interval`, and when
+    // using non-power of 2 buffer sizes of buffers that are smaller than
+    // `windowing_interval` it can happen that we have to copy over already
+    // processed audio before processing a new window
+    const size_t already_processed_samples = std::min(
+        num_samples, (windowing_interval -
+                      (input_ring_buffers[0].pos() % windowing_interval)) %
+                         windowing_interval);
+    const size_t samples_to_be_processed =
+        num_samples - already_processed_samples;
+    const int windows_to_process = std::ceil(
+        static_cast<float>(samples_to_be_processed) / windowing_interval);
 
-        // We process incoming audio in windows of `windowing_interval`, and
-        // when using non-power of 2 buffer sizes of buffers that are smaller
-        // than `windowing_interval` it can happen that we have to copy over
-        // already processed audio before processing a new window
-        const size_t already_processed_samples = std::min(
-            num_samples,
-            (windowing_interval -
-             (input_ring_buffers[channel].pos() % windowing_interval)) %
-                windowing_interval);
-        const size_t samples_to_be_processed =
-            num_samples - already_processed_samples;
-        const int windows_to_process = std::ceil(
-            static_cast<float>(samples_to_be_processed) / windowing_interval);
+    // Since we're processing audio in small chunks, we need to keep track of
+    // the current sample offset in `buffers` we should use for our actual audio
+    // input and output
+    size_t sample_buffer_offset = 0;
 
-        // Copying from the input buffer to our input ring buffer, copying from
-        // our output ring buffer to the output buffer, and clearing the output
-        // buffer to prevent feedback is always done in sync
-        if (already_processed_samples > 0) {
-            input_ring_buffers[channel].read_n_from(sample_buffer,
-                                                    already_processed_samples);
+    // Copying from the input buffer to our input ring buffer, copying from
+    // our output ring buffer to the output buffer, and clearing the output
+    // buffer to prevent feedback is always done in sync
+    if (already_processed_samples > 0) {
+        for (size_t channel = 0; channel < input_channels; channel++) {
+            input_ring_buffers[channel].read_n_from(
+                main_io.getReadPointer(channel), already_processed_samples);
             output_ring_buffers[channel].copy_n_to(
-                sample_buffer, already_processed_samples, true);
+                main_io.getWritePointer(channel), already_processed_samples,
+                true);
             if (sidechain_active) {
                 sidechain_ring_buffers[channel].read_n_from(
-                    sidechain_buffer, already_processed_samples);
+                    sidechain_io.getReadPointer(channel),
+                    already_processed_samples);
             }
-
-            sample_buffer_offset += already_processed_samples;
         }
 
-        // Now if `windows_to_process > 0`, the current ring buffer position
-        // will align with a window and we can start doing our FFT magic
-        for (int window_idx = 0; window_idx < windows_to_process;
-             window_idx++) {
-            // This is actual processing
-            if (!bypassed) {
-                // If sidechaining is active, we set the compressor thresholds
-                // based on a sidechain signal. Since compression is already
-                // ballistics based we don't need any additional smoothing here.
-                // TODO: When sidechaining has just been disabled, all
-                //       compressor thresholds should be reset. We can probably
-                //       do this together with the threshold updating just
-                //       before we compress a magnitude.
-                if (sidechain_active) {
+        sample_buffer_offset += already_processed_samples;
+    }
+
+    // Now if `windows_to_process > 0`, the current ring buffer position will
+    // align with a window and we can start doing our FFT magic
+    // TODO: Add oversampling, potentially reduce latency
+    for (int window_idx = 0; window_idx < windows_to_process; window_idx++) {
+        // This is actual processing
+        if (!bypassed) {
+            // If sidechaining is active, we set the compressor thresholds based
+            // on a sidechain signal. Since compression is already ballistics
+            // based we don't need any additional smoothing here.
+            // TODO: When sidechaining has just been disabled, all compressor
+            //       thresholds should be reset. We can probably do this
+            //       together with the threshold updating just before we
+            //       compress a magnitude.
+            if (sidechain_active) {
+                for (size_t channel = 0; channel < input_channels; channel++) {
                     sidechain_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.data(), fft_window_size);
+                        fft_scratch_buffer.getWritePointer(channel),
+                        fft_window_size);
                     windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_window_size);
+                        fft_scratch_buffer.getWritePointer(channel),
+                        fft_window_size);
                     // TODO: We can skip negative frequencies here, right?
                     fft.performRealOnlyForwardTransform(
-                        fft_scratch_buffer.data(), true);
+                        fft_scratch_buffer.getWritePointer(channel), true);
 
                     // The version below is better annotated
                     std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
-                            fft_scratch_buffer.data()),
+                            fft_scratch_buffer.getWritePointer(channel)),
                         fft_window_size);
+
+                    // TODO: This is incorrect. We need to average the threshold
+                    //       from all channels since there's no per-channel
+                    //       threshold.
                     for (size_t compressor_idx = 0;
                          compressor_idx < spectral_compressors.size();
                          compressor_idx++) {
@@ -321,12 +332,17 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                             magnitude);
                     }
                 }
+            }
 
+            for (size_t channel = 0; channel < input_channels; channel++) {
                 input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.data(), fft_window_size);
+                    fft_scratch_buffer.getWritePointer(channel),
+                    fft_window_size);
                 windowing_function.multiplyWithWindowingTable(
-                    fft_scratch_buffer.data(), fft_window_size);
-                fft.performRealOnlyForwardTransform(fft_scratch_buffer.data());
+                    fft_scratch_buffer.getWritePointer(channel),
+                    fft_window_size);
+                fft.performRealOnlyForwardTransform(
+                    fft_scratch_buffer.getWritePointer(channel));
 
                 // We'll compress every FTT bin individually. Bin 0 is the DC
                 // offset and should be skipped, and the latter half of the FFT
@@ -337,7 +353,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // complex value functions.
                 std::span<std::complex<float>> fft_buffer(
                     reinterpret_cast<std::complex<float>*>(
-                        fft_scratch_buffer.data()),
+                        fft_scratch_buffer.getWritePointer(channel)),
                     fft_window_size);
                 for (size_t compressor_idx = 0;
                      compressor_idx < spectral_compressors.size();
@@ -373,7 +389,8 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
                 // TODO: Should we also use the window function after
                 //       processing?
-                fft.performRealOnlyInverseTransform(fft_scratch_buffer.data());
+                fft.performRealOnlyInverseTransform(
+                    fft_scratch_buffer.getWritePointer(channel));
 
                 // TODO: Makeup gain, and when implementing this, take into
                 //       account that the 4x overlap also multiplies the volume
@@ -384,40 +401,47 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // After processing the windowed data, we'll add it to our
                 // output ring buffer
                 output_ring_buffers[channel].add_n_from_in_place(
-                    fft_scratch_buffer.data(), fft_window_size);
-            } else {
+                    fft_scratch_buffer.getReadPointer(channel),
+                    fft_window_size);
+            }
+        } else {
+            for (size_t channel = 0; channel < input_channels; channel++) {
                 // We don't have a way to directly copy between buffers, but
                 // most hosts should not actually hit this bypassed state
                 // anyways
                 // TODO: At some point, do implement this without using the
                 //       scratch buffer
                 input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.data(), fft_window_size);
+                    fft_scratch_buffer.getWritePointer(channel),
+                    fft_window_size);
                 output_ring_buffers[channel].read_n_from_in_place(
-                    fft_scratch_buffer.data(), fft_window_size);
+                    fft_scratch_buffer.getReadPointer(channel),
+                    fft_window_size);
             }
+        }
 
-            // Copy the input audio into our ring buffer and copy the processed
-            // audio into the output buffer
-            const size_t samples_to_process_this_iteration = std::min(
-                windowing_interval, num_samples - sample_buffer_offset);
+        // Copy the input audio into our ring buffer and copy the processed
+        // audio into the output buffer
+        const size_t samples_to_process_this_iteration =
+            std::min(windowing_interval, num_samples - sample_buffer_offset);
+        for (size_t channel = 0; channel < input_channels; channel++) {
             input_ring_buffers[channel].read_n_from(
-                sample_buffer + sample_buffer_offset,
+                main_io.getReadPointer(channel) + sample_buffer_offset,
                 samples_to_process_this_iteration);
             output_ring_buffers[channel].copy_n_to(
-                sample_buffer + sample_buffer_offset,
+                main_io.getWritePointer(channel) + sample_buffer_offset,
                 samples_to_process_this_iteration, true);
             if (sidechain_active) {
                 sidechain_ring_buffers[channel].read_n_from(
-                    sidechain_buffer + sample_buffer_offset,
+                    sidechain_io.getReadPointer(channel) + sample_buffer_offset,
                     samples_to_process_this_iteration);
             }
-
-            sample_buffer_offset += samples_to_process_this_iteration;
         }
 
-        jassert(sample_buffer_offset == num_samples);
+        sample_buffer_offset += samples_to_process_this_iteration;
     }
+
+    jassert(sample_buffer_offset == num_samples);
 }
 
 //==============================================================================
