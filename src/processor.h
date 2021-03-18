@@ -97,8 +97,11 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
     /**
      * We need a scratch buffer that can contain `fft_window_size * 2` samples
-     * for every channel. Because of the oversampling we have to process all
-     * channels in lockstep.
+     * for every channel.
+     *
+     * TODO: We can technically now make do with only one of these. This was
+     *       required for oversampling, which as it turns out didn't make things
+     *       much better.
      */
     juce::AudioBuffer<float> fft_scratch_buffer;
 

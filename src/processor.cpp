@@ -291,7 +291,6 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
     // Now if `windows_to_process > 0`, the current ring buffer position will
     // align with a window and we can start doing our FFT magic
-    // TODO: Add oversampling, potentially reduce latency
     for (int window_idx = 0; window_idx < windows_to_process; window_idx++) {
         // This is actual processing
         if (!bypassed) {
@@ -371,6 +370,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                     // We need to scale both the imaginary and real components
                     // of the bins at the start and end of the spectrum by the
                     // same value
+                    // TODO: Add stereo linking
                     const float compression_multiplier =
                         magnitude != 0.0f ? compressed_magnitude / magnitude
                                           : 1.0f;
