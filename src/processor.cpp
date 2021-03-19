@@ -110,10 +110,7 @@ void SpectralCompressorProcessor::prepareToPlay(
 
     // JUCE's FFT class interleaves the real and imaginary numbers, so this
     // buffer should be twice the window size in size
-    // TODO: We technically only need one channel here so we can optimize a bit
-    //       later
-    fft_scratch_buffer.setSize(getMainBusNumInputChannels(),
-                               fft_window_size * 2, false, true, false);
+    fft_scratch_buffer.resize(fft_window_size * 2);
 
     // Every FFT bin on both channels gets its own compressor, hooray!
     // The `(fft_window_size / 2) - 1` is because the first bin is the DC offset
@@ -173,7 +170,7 @@ void SpectralCompressorProcessor::releaseResources() {
     // TODO: Clearing a vector actually doesn't really do anything. So either
     //       don't do anything here or actually swap these vectors with new
     //       vectors/shrink to fit.
-    fft_scratch_buffer.setSize(0, 0);
+    fft_scratch_buffer.clear();
     spectral_compressors.clear();
     input_ring_buffers.clear();
     output_ring_buffers.clear();
@@ -304,19 +301,17 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
             if (sidechain_active) {
                 for (size_t channel = 0; channel < input_channels; channel++) {
                     sidechain_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.getWritePointer(channel),
-                        fft_window_size);
+                        fft_scratch_buffer.data(), fft_window_size);
                     windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.getWritePointer(channel),
-                        fft_window_size);
+                        fft_scratch_buffer.data(), fft_window_size);
                     // TODO: We can skip negative frequencies here, right?
                     fft.performRealOnlyForwardTransform(
-                        fft_scratch_buffer.getWritePointer(channel), true);
+                        fft_scratch_buffer.data(), true);
 
                     // The version below is better annotated
                     std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
-                            fft_scratch_buffer.getWritePointer(channel)),
+                            fft_scratch_buffer.data()),
                         fft_window_size);
 
                     // TODO: This is incorrect. We need to average the threshold
@@ -335,13 +330,10 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
             for (size_t channel = 0; channel < input_channels; channel++) {
                 input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.getWritePointer(channel),
-                    fft_window_size);
+                    fft_scratch_buffer.data(), fft_window_size);
                 windowing_function.multiplyWithWindowingTable(
-                    fft_scratch_buffer.getWritePointer(channel),
-                    fft_window_size);
-                fft.performRealOnlyForwardTransform(
-                    fft_scratch_buffer.getWritePointer(channel));
+                    fft_scratch_buffer.data(), fft_window_size);
+                fft.performRealOnlyForwardTransform(fft_scratch_buffer.data());
 
                 // We'll compress every FTT bin individually. Bin 0 is the DC
                 // offset and should be skipped, and the latter half of the FFT
@@ -352,7 +344,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // complex value functions.
                 std::span<std::complex<float>> fft_buffer(
                     reinterpret_cast<std::complex<float>*>(
-                        fft_scratch_buffer.getWritePointer(channel)),
+                        fft_scratch_buffer.data()),
                     fft_window_size);
                 for (size_t compressor_idx = 0;
                      compressor_idx < spectral_compressors.size();
@@ -389,8 +381,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
                 // TODO: Should we also use the window function after
                 //       processing?
-                fft.performRealOnlyInverseTransform(
-                    fft_scratch_buffer.getWritePointer(channel));
+                fft.performRealOnlyInverseTransform(fft_scratch_buffer.data());
 
                 // TODO: Makeup gain, and when implementing this, take into
                 //       account that the 4x overlap also multiplies the volume
@@ -401,8 +392,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // After processing the windowed data, we'll add it to our
                 // output ring buffer
                 output_ring_buffers[channel].add_n_from_in_place(
-                    fft_scratch_buffer.getReadPointer(channel),
-                    fft_window_size);
+                    fft_scratch_buffer.data(), fft_window_size);
             }
         } else {
             for (size_t channel = 0; channel < input_channels; channel++) {
@@ -412,11 +402,9 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // TODO: At some point, do implement this without using the
                 //       scratch buffer
                 input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.getWritePointer(channel),
-                    fft_window_size);
+                    fft_scratch_buffer.data(), fft_window_size);
                 output_ring_buffers[channel].read_n_from_in_place(
-                    fft_scratch_buffer.getReadPointer(channel),
-                    fft_window_size);
+                    fft_scratch_buffer.data(), fft_window_size);
             }
         }
 
