@@ -22,7 +22,19 @@
 
 using juce::uint32;
 
-//==============================================================================
+constexpr char compressor_settings_group_name[] = "compressors";
+constexpr char sidechain_active_param_name[] = "sidechain_active";
+
+CompressorSettingsListener::CompressorSettingsListener(
+    std::atomic_bool& compressor_settings_changed)
+    : compressor_settings_changed(compressor_settings_changed) {}
+
+void CompressorSettingsListener::parameterChanged(
+    const juce::String& /*parameterID*/,
+    float /*newValue*/) {
+    compressor_settings_changed = true;
+}
+
 SpectralCompressorProcessor::SpectralCompressorProcessor()
     : AudioProcessor(
           BusesProperties()
@@ -38,14 +50,27 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
       parameters(*this,
                  nullptr,
                  "parameters",
-                 {std::make_unique<juce::AudioParameterBool>("sidechain_active",
-                                                             "Sidechain Active",
-                                                             false)}),
+                 {
+                     std::make_unique<juce::AudioProcessorParameterGroup>(
+                         compressor_settings_group_name,
+                         "Compressors",
+                         " | ",
+                         std::make_unique<juce::AudioParameterBool>(
+                             sidechain_active_param_name,
+                             "Sidechain Active",
+                             false)),
+                 }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
       sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
-          parameters.getParameter("sidechain_active"))) {
+          parameters.getParameter(sidechain_active_param_name))),
+      compressor_settings_listener(compressor_settings_changed) {
     setLatencySamples(fft_window_size);
+
+    // XXX: There doesn't seem to be a fool proof way to just iterate over all
+    //      parameters in a group, right?
+    parameters.addParameterListener(sidechain_active_param_name,
+                                    &compressor_settings_listener);
 }
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
@@ -228,6 +253,8 @@ void SpectralCompressorProcessor::setStateInformation(const void* data,
     if (xml && xml->hasTagName(parameters.state.getType())) {
         parameters.replaceState(juce::ValueTree::fromXml(*xml));
     }
+
+    compressor_settings_changed = true;
 }
 
 void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,

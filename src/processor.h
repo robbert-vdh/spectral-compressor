@@ -40,6 +40,25 @@ static_assert(1 << fft_order == fft_window_size,
  */
 constexpr size_t windowing_interval = fft_window_size / 4;
 
+/**
+ * Used to signal to the audio thread that the compressors should be updated
+ * first. This contains a reference to the `compressor_settings_changed` field
+ * of the processor.
+ */
+class CompressorSettingsListener
+    : public juce::AudioProcessorValueTreeState::Listener {
+   public:
+    CompressorSettingsListener(std::atomic_bool& compressor_settings_changed);
+
+    void parameterChanged(const juce::String& parameterID,
+                          float newValue) override;
+
+   private:
+    std::atomic_bool& compressor_settings_changed;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CompressorSettingsListener)
+};
+
 class SpectralCompressorProcessor : public juce::AudioProcessor {
    public:
     SpectralCompressorProcessor();
@@ -77,6 +96,8 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void setStateInformation(const void* data, int sizeInBytes) override;
 
    private:
+    // We need this stuff for our DSP
+
     /**
      * Process audio. When the plugin is bypassed we should still compensate for
      * the altency, so if `bypassed` is true we handle audio the exact same way
@@ -141,8 +162,22 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     std::vector<RingBuffer<float>> sidechain_ring_buffers;
 
+    // Parameters
+
     juce::AudioProcessorValueTreeState parameters;
     juce::AudioParameterBool& sidechain_active;
+
+    /**
+     * Will be set in `CompressorSettingsListener` when any of the compressor
+     * related settings change so we can update our compressors. We'll
+     * initialize this to true so the compressors will be initialized during the
+     * first processing cycle.
+     */
+    std::atomic_bool compressor_settings_changed = true;
+
+    // Listeners
+
+    CompressorSettingsListener compressor_settings_listener;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };
