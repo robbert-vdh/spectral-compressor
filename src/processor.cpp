@@ -64,6 +64,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
       //       Seems a bit excessive
       sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(sidechain_active_param_name))),
+      compressor_settings_changed(true),
       compressor_settings_listener(compressor_settings_changed) {
     setLatencySamples(fft_window_size);
 
@@ -161,25 +162,6 @@ void SpectralCompressorProcessor::prepareToPlay(
     spectral_compressors.resize((fft_window_size / 2) - 1, compressor);
     spectral_compressor_sidechain_thresholds.resize(
         spectral_compressors.size());
-
-    // The thresholds are set to match pink noise.
-    // TODO: Change the calculations so that the base threshold parameter is
-    //       centered around some frequency
-    constexpr float base_threshold_dbfs = 0.0f;
-    const float frequency_increment = sampleRate / fft_window_size;
-    for (size_t compressor_idx = 0;
-         compressor_idx < spectral_compressors.size(); compressor_idx++) {
-        // The first bin doesn't get a compressor
-        const size_t bin_idx = compressor_idx + 1;
-        const float frequency = frequency_increment * bin_idx;
-
-        // This starts at 1 for 0 Hz (DC)
-        const float octave = std::log2(frequency + 2);
-
-        // The 3 dB is to compensate for bin 0
-        const float threshold = (base_threshold_dbfs + 3.0f) - (3.0f * octave);
-        spectral_compressors[compressor_idx].setThreshold(threshold);
-    }
 
     // We use ring buffers to store the samples we'll process using FFT and also
     // to store the samples that should be played back to.
@@ -316,6 +298,14 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
         sample_buffer_offset += already_processed_samples;
     }
 
+    // We'll update the compressor settings just before processing if the
+    // settings have changed or if the sidechaining has been disabled.
+    bool expected = true;
+    if (windows_to_process > 0 &&
+        compressor_settings_changed.compare_exchange_strong(expected, false)) {
+        update_compressors();
+    }
+
     // Now if `windows_to_process > 0`, the current ring buffer position will
     // align with a window and we can start doing our FFT magic
     for (int window_idx = 0; window_idx < windows_to_process; window_idx++) {
@@ -324,10 +314,6 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
             // If sidechaining is active, we set the compressor thresholds based
             // on a sidechain signal. Since compression is already ballistics
             // based we don't need any additional smoothing here.
-            // TODO: When sidechaining has just been disabled, all compressor
-            //       thresholds should be reset. We can probably do this
-            //       together with the threshold updating just before we
-            //       compress a magnitude.
             if (sidechain_active) {
                 for (size_t channel = 0; channel < input_channels; channel++) {
                     sidechain_ring_buffers[channel].copy_last_n_to(
@@ -473,6 +459,30 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     }
 
     jassert(sample_buffer_offset == num_samples);
+}
+
+void SpectralCompressorProcessor::update_compressors() {
+    if (!sidechain_active) {
+        // The thresholds are set to match pink noise.
+        // TODO: Change the calculations so that the base threshold parameter is
+        //       centered around some frequency
+        constexpr float base_threshold_dbfs = 0.0f;
+        const float frequency_increment = getSampleRate() / fft_window_size;
+        for (size_t compressor_idx = 0;
+             compressor_idx < spectral_compressors.size(); compressor_idx++) {
+            // The first bin doesn't get a compressor
+            const size_t bin_idx = compressor_idx + 1;
+            const float frequency = frequency_increment * bin_idx;
+
+            // This starts at 1 for 0 Hz (DC)
+            const float octave = std::log2(frequency + 2);
+
+            // The 3 dB is to compensate for bin 0
+            const float threshold =
+                (base_threshold_dbfs + 3.0f) - (3.0f * octave);
+            spectral_compressors[compressor_idx].setThreshold(threshold);
+        }
+    }
 }
 
 //==============================================================================

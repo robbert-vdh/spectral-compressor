@@ -106,6 +106,12 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void process(juce::AudioBuffer<float>& buffer, bool bypassed);
 
     /**
+     * Calculate new compressor thresholds and other settings based on the
+     * current parameters.
+     */
+    void update_compressors();
+
+    /**
      * We'll process the signal with overlapping windows. See
      * `input_ring_buffers` for more information on how we'll do this.
      */
