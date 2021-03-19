@@ -134,6 +134,8 @@ void SpectralCompressorProcessor::prepareToPlay(
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
     spectral_compressors.resize((fft_window_size / 2) - 1, compressor);
+    spectral_compressor_sidechain_thresholds.resize(
+        spectral_compressors.size());
 
     // The thresholds are set to match pink noise.
     // TODO: Change the calculations so that the base threshold parameter is
@@ -172,6 +174,7 @@ void SpectralCompressorProcessor::releaseResources() {
     //       vectors/shrink to fit.
     fft_scratch_buffer.clear();
     spectral_compressors.clear();
+    spectral_compressor_sidechain_thresholds.clear();
     input_ring_buffers.clear();
     output_ring_buffers.clear();
     sidechain_ring_buffers.clear();
@@ -313,18 +316,31 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                         reinterpret_cast<std::complex<float>*>(
                             fft_scratch_buffer.data()),
                         fft_window_size);
-
-                    // TODO: This is incorrect. We need to average the threshold
-                    //       from all channels since there's no per-channel
-                    //       threshold.
                     for (size_t compressor_idx = 0;
                          compressor_idx < spectral_compressors.size();
                          compressor_idx++) {
                         const size_t bin_idx = compressor_idx + 1;
                         const float magnitude = std::abs(fft_buffer[bin_idx]);
-                        spectral_compressors[compressor_idx].setThreshold(
-                            magnitude);
+
+                        // We'll set the compressor threshold based on the
+                        // arithmetic mean of the magnitudes of all channels. As
+                        // a slight premature optimization (sorry) we'll reset
+                        // these magnitudes after using them to avoid the
+                        // conditional here.
+                        spectral_compressor_sidechain_thresholds
+                            [compressor_idx] += magnitude;
                     }
+                }
+
+                for (size_t compressor_idx = 0;
+                     compressor_idx < spectral_compressors.size();
+                     compressor_idx++) {
+                    spectral_compressors[compressor_idx].setThreshold(
+                        spectral_compressor_sidechain_thresholds
+                            [compressor_idx] /
+                        input_channels);
+                    spectral_compressor_sidechain_thresholds[compressor_idx] =
+                        0;
                 }
             }
 

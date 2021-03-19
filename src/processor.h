@@ -112,6 +112,15 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     std::vector<juce::dsp::Compressor<float>> spectral_compressors;
 
     /**
+     * When setting compressor thresholds based on a sidechain signal we should
+     * be taking the average bin magnitudes of all channels. This buffer
+     * accumulates `spectral_compressors.size()` threshold values while
+     * iterating over the channels of the sidechain signal so we can then
+     * average them and configure the compressors based on that.
+     */
+    std::vector<float> spectral_compressor_sidechain_thresholds;
+
+    /**
      * A ring buffer of size `fft_window_size` for every channel. Every
      * `windowing_interval` we'll copy the last `fft_window_size` samples to
      * `fft_scratch_buffers` using a window function, process it, and then add
