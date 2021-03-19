@@ -16,7 +16,23 @@ endif()
 # Fetch JUCE and other dependencies
 
 include(cmake/CPM.cmake)
+
 CPMAddPackage("gh:juce-framework/JUCE#6.0.7")
+# TODO: How can we fall back to linking to system FFTW? This seems to be quite a
+#       mess, and the CMake config for FFTW that ships with most distros is
+#       invalid
+# TODO: Is there no way to add a checksum or something?
+CPMAddPackage(
+  NAME fftw
+  VERSIOIN 3.3.9
+  URL http://fftw.org/fftw-3.3.9.tar.gz
+  OPTIONS
+    "BUILD_TESTS OFF"
+    "ENABLE_FLOAT ON"
+    "ENABLE_SSE2 ON"
+    "ENABLE_AVX ON"
+    "ENABLE_AVX2 ON"
+)
 
 # We only expose a single VST3 plugin
 
@@ -47,18 +63,20 @@ target_compile_definitions(SpectralCompressor PUBLIC
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
   JUCE_VST3_CAN_REPLACE_VST2=0
-  # We're using the GPL
-  JUCE_DISPLAY_SPLASH_SCREEN=0)
+  # We're licensed under the GPL
+  JUCE_DISPLAY_SPLASH_SCREEN=0
+  JUCE_DSP_USE_STATIC_FFTW=1)
 
 # TODO: Fix static linking. With JUCE's default settings we dynamically link to
 #       a ton of stuff (and stuff that we don't even use).
-# TODO: Make sure that we're using FFTW
 
-target_link_libraries(SpectralCompressor PUBLIC
-  juce::juce_recommended_warning_flags
-  juce::juce_recommended_lto_flags
-  juce::juce_recommended_config_flags
+target_link_libraries(SpectralCompressor
+  PUBLIC
+    juce::juce_recommended_warning_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_config_flags
 
   PRIVATE
-  juce::juce_audio_utils
-  juce::juce_dsp)
+    juce::juce_audio_utils
+    juce::juce_dsp
+    fftw3f)
