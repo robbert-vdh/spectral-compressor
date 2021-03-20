@@ -27,6 +27,10 @@
 constexpr int fft_window_size = 4096;
 /**
  * `log2(fft_window_size)`, used to create the FFT processor.
+ *
+ * TODO: The FFT order should be configurable as frequency resolution from
+ *       order 9 (512 samples) up to order 15 (32768 samples) with the default
+ *       being 12 (4096 samples)
  */
 constexpr int fft_order = 12;
 
@@ -35,6 +39,12 @@ static_assert(1 << fft_order == fft_window_size,
 
 /**
  * How many times overlapping windows we process in `fft_window_size` samples.
+ *
+ * TODO: We should have a time resolution parameter that controls the amount of
+ *       overlap in the windowing from 2 to 64(?) times. To the user this should
+ *       be presented as samples ranging from `fft_window_size / 64` to
+ *       `ffw_window_size / 2`. Maybe find some nice way to lock this in place
+ *       while changing the window size?
  */
 constexpr int windowing_overlap_times = 4;
 
