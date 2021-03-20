@@ -2,11 +2,11 @@ cmake_minimum_required(VERSION 3.15)
 
 project(spectral_compressor VERSION 0.0.1 LANGUAGES CXX)
 
-# During development you'll probably want to add
-# `-DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DJUCE_ENABLE_MODULE_SOURCE_GROUPS=1`
-# to the CMake command line
-set_property(GLOBAL PROPERTY USE_FOLDERS YES)
+# TODO: Figure out a clean way to allow maintainers to disable all static
+#       linking and downloading
+option(FORCE_STATIC_LINKING "Statically link all dependencies, for distribution" OFF)
 
+# CMake for some reason doesn't enable diagnostic colors by default
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compile_options(-fdiagnostics-color=always)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -16,17 +16,19 @@ endif()
 # Fetch JUCE and other dependencies. For non-JUCE dependencies we'll check
 # whether the package is available locally with pkgconfig before trying to
 # download and build it ourselves.
-
-find_package(PkgConfig)
-if(PkgConfig_FOUND)
-  pkg_search_module(FFTW fftw3f IMPORTED_TARGET)
-endif()
-
 include(cmake/CPM.cmake)
 CPMAddPackage("gh:juce-framework/JUCE#6.0.7")
 
-# TODO: Add a way to force statically linking for distribution
-if(FFTW_FOUND)
+if(NOT FORCE_STATIC_LINKING)
+  find_package(PkgConfig)
+  if(PkgConfig_FOUND)
+    pkg_search_module(FFTW IMPORTED_TARGET fftw3f)
+  endif()
+endif()
+
+# Either dynamically link to the system FFTW, or statically link for
+# distribution (FFTW also seems to rarely be shipped with static archives)
+if(FFTW_FOUND AND NOT FORCE_STATIC_LINKING)
   set(fftw_target PkgConfig::FFTW)
   set(use_shared_fftw TRUE)
 else()
@@ -73,9 +75,6 @@ target_sources(SpectralCompressor PRIVATE
   src/editor.cpp
   src/processor.cpp)
 
-target_compile_features(SpectralCompressor PUBLIC cxx_std_20)
-set_target_properties(SpectralCompressor PROPERTIES CXX_EXTENSIONS OFF)
-
 target_compile_definitions(SpectralCompressor PUBLIC
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
@@ -84,6 +83,15 @@ target_compile_definitions(SpectralCompressor PUBLIC
   JUCE_DISPLAY_SPLASH_SCREEN=0
   $<$<BOOL:${use_shared_fftw}>:JUCE_DSP_USE_SHARED_FFTW=1>
   $<$<BOOL:${use_static_fftw}>:JUCE_DSP_USE_STATIC_FFTW=1>)
+
+target_compile_features(SpectralCompressor PUBLIC cxx_std_20)
+set_target_properties(SpectralCompressor PROPERTIES CXX_EXTENSIONS OFF)
+
+if(FORCE_STATIC_LINKING)
+  # TODO: Do something similar for macOS and Linux, since we're using some C++20
+  #       features
+  set_target_properties(SpectralCompressor PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 # TODO: Fix static linking. With JUCE's default settings we dynamically link to
 #       a ton of stuff (and stuff that we don't even use).
