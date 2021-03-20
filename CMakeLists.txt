@@ -13,26 +13,43 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-fcolor-diagnostics)
 endif()
 
-# Fetch JUCE and other dependencies
+# Fetch JUCE and other dependencies. For non-JUCE dependencies we'll check
+# whether the package is available locally with pkgconfig before trying to
+# download and build it ourselves.
+
+find_package(PkgConfig)
+if(PkgConfig_FOUND)
+  pkg_search_module(FFTW fftw3f IMPORTED_TARGET)
+endif()
 
 include(cmake/CPM.cmake)
-
 CPMAddPackage("gh:juce-framework/JUCE#6.0.7")
-# TODO: How can we fall back to linking to system FFTW? This seems to be quite a
-#       mess, and the CMake config for FFTW that ships with most distros is
-#       invalid
-# TODO: Is there no way to add a checksum or something?
-CPMAddPackage(
-  NAME fftw
-  VERSIOIN 3.3.9
-  URL http://fftw.org/fftw-3.3.9.tar.gz
-  OPTIONS
+
+# TODO: Add a way to force statically linking for distribution
+if(FFTW_FOUND)
+  set(fftw_target PkgConfig::FFTW)
+  set(use_shared_fftw TRUE)
+else()
+  message(STATUS "fftw3f not found using pkgconfig, falling back to a statically linked local build")
+
+  # TODO: Is there no way to add a checksum or something?
+  CPMAddPackage(
+    NAME FFTW
+    VERSIOIN 3.3.9
+    URL http://fftw.org/fftw-3.3.9.tar.gz
+    OPTIONS
+    "BUILD_SHARED_LIBS OFF"
     "BUILD_TESTS OFF"
     "ENABLE_FLOAT ON"
     "ENABLE_SSE2 ON"
-    "ENABLE_AVX ON"
     "ENABLE_AVX2 ON"
-)
+  )
+
+  # CMake builds static libraries without -fPIC by default
+  set_target_properties(fftw3f PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  set(fftw_target fftw3f)
+  set(use_static_fftw TRUE)
+endif()
 
 # We only expose a single VST3 plugin
 
@@ -65,11 +82,11 @@ target_compile_definitions(SpectralCompressor PUBLIC
   JUCE_VST3_CAN_REPLACE_VST2=0
   # We're licensed under the GPL
   JUCE_DISPLAY_SPLASH_SCREEN=0
-  JUCE_DSP_USE_STATIC_FFTW=1)
+  $<$<BOOL:${use_shared_fftw}>:JUCE_DSP_USE_SHARED_FFTW=1>
+  $<$<BOOL:${use_static_fftw}>:JUCE_DSP_USE_STATIC_FFTW=1>)
 
 # TODO: Fix static linking. With JUCE's default settings we dynamically link to
 #       a ton of stuff (and stuff that we don't even use).
-
 target_link_libraries(SpectralCompressor
   PUBLIC
     juce::juce_recommended_warning_flags
@@ -79,4 +96,4 @@ target_link_libraries(SpectralCompressor
   PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
-    fftw3f)
+    ${fftw_target})
