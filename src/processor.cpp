@@ -24,11 +24,8 @@ using juce::uint32;
 
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
+constexpr char compressor_ratio_param_name[] = "compressor_ratio";
 constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
-
-// TODO: This is only a temporary constant because we need the value elsewhere.
-//       This should just be a parameter.
-constexpr float compressor_ratio = 50.0f;
 
 CompressorSettingsListener::CompressorSettingsListener(
     std::atomic_bool& compressor_settings_changed)
@@ -53,27 +50,35 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           false),
       fft(fft_order),
       compressor_settings_changed(true),
-      parameters(*this,
-                 nullptr,
-                 "parameters",
-                 {
-                     std::make_unique<juce::AudioProcessorParameterGroup>(
-                         compressor_settings_group_name,
-                         "Compressors",
-                         " | ",
-                         std::make_unique<juce::AudioParameterBool>(
-                             sidechain_active_param_name,
-                             "Sidechain Active",
-                             false),
-                         std::make_unique<juce::AudioParameterBool>(
-                             auto_makeup_gain_param_name,
-                             "Auto Makeup Gain",
-                             true)),
-                 }),
+      parameters(
+          *this,
+          nullptr,
+          "parameters",
+          {
+              std::make_unique<juce::AudioProcessorParameterGroup>(
+                  compressor_settings_group_name,
+                  "Compressors",
+                  " | ",
+                  std::make_unique<juce::AudioParameterBool>(
+                      sidechain_active_param_name,
+                      "Sidechain Active",
+                      false),
+                  std::make_unique<juce::AudioParameterFloat>(
+                      compressor_ratio_param_name,
+                      "Compressor Ratio",
+                      juce::NormalisableRange<float>(1.0, 300.0, 0.1, 0.25),
+                      50.0),
+                  std::make_unique<juce::AudioParameterBool>(
+                      auto_makeup_gain_param_name,
+                      "Auto Makeup Gain",
+                      true)),
+          }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
       sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(sidechain_active_param_name))),
+      compressor_ratio(
+          *parameters.getRawParameterValue(compressor_ratio_param_name)),
       auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(auto_makeup_gain_param_name))),
       compressor_settings_listener(compressor_settings_changed) {
@@ -81,10 +86,12 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
 
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
     //      parameters in a group, right?
-    parameters.addParameterListener(sidechain_active_param_name,
-                                    &compressor_settings_listener);
-    parameters.addParameterListener(auto_makeup_gain_param_name,
-                                    &compressor_settings_listener);
+    for (const auto& compressor_param_name :
+         {sidechain_active_param_name, compressor_ratio_param_name,
+          auto_makeup_gain_param_name}) {
+        parameters.addParameterListener(compressor_param_name,
+                                        &compressor_settings_listener);
+    }
 }
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
@@ -156,13 +163,11 @@ void SpectralCompressorProcessor::prepareToPlay(
     // and shouldn't be compressed, and the bins after the Nyquist frequency are
     // the same as the first half but in reverse order.
     // TODO: Make the compressor settings configurable
-    // TODO: These settings are also very extreme
     // TODO: The user should be able to configure their own slope (or free
     //       drawn)
     // TODO: And we should be doing both upwards and downwards compression,
     //       OTT-style
     juce::dsp::Compressor<float> compressor{};
-    compressor.setRatio(compressor_ratio);
     compressor.setAttack(50.0);
     compressor.setRelease(5000.0);
     compressor.prepare(juce::dsp::ProcessSpec{
@@ -468,6 +473,11 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
 void SpectralCompressorProcessor::update_compressors() {
     constexpr float base_threshold_dbfs = 0.0f;
+
+    for (size_t compressor_idx = 0;
+         compressor_idx < spectral_compressors.size(); compressor_idx++) {
+        spectral_compressors[compressor_idx].setRatio(compressor_ratio);
+    }
 
     if (!sidechain_active) {
         // The thresholds are set to match pink noise.
