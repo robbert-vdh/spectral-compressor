@@ -501,17 +501,22 @@ void SpectralCompressorProcessor::update_compressors() {
     }
 
     // We need to compensate for the extra gain added by 4x overlap
-    makeup_gain = 1.0f / windowing_overlap_times;
+    // TODO: Once we make this configurable, figure out the proper way to
+    //       compensate for overlap
+    makeup_gain = 1.0f / std::sqrt(windowing_overlap_times);
     if (auto_makeup_gain) {
         if (sidechain_active) {
             // Not really sure what makes sense here
-            makeup_gain *= 8.0;
+            // TODO: Take base threshold into account
+            makeup_gain *= (compressor_ratio + 24.0f) / 25.0f;
         } else {
             // TODO: Make this smarter, make it take all of the compressor
             //       parameters into account. It will probably start making
             //       sense once we add parameters for the threshold and ratio.
+            // FIXME: This makes zero sense! But it works for our current
+            //        parameters.
             makeup_gain *=
-                juce::Decibels::decibelsToGain(compressor_ratio - 1.0f);
+                (std::log10(compressor_ratio * 100.00f) * 200.0f) - 399.0f;
         }
     }
 }
