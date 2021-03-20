@@ -24,6 +24,11 @@ using juce::uint32;
 
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
+constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
+
+// TODO: This is only a temporary constant because we need the value elsewhere.
+//       This should just be a parameter.
+constexpr float compressor_ratio = 50.0f;
 
 CompressorSettingsListener::CompressorSettingsListener(
     std::atomic_bool& compressor_settings_changed)
@@ -47,6 +52,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           // TODO: Or should we leave normalization enabled?
           false),
       fft(fft_order),
+      compressor_settings_changed(true),
       parameters(*this,
                  nullptr,
                  "parameters",
@@ -58,19 +64,26 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                          std::make_unique<juce::AudioParameterBool>(
                              sidechain_active_param_name,
                              "Sidechain Active",
-                             false)),
+                             false),
+                         std::make_unique<juce::AudioParameterBool>(
+                             auto_makeup_gain_param_name,
+                             "Auto Makeup Gain",
+                             true)),
                  }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
       sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(sidechain_active_param_name))),
-      compressor_settings_changed(true),
+      auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters.getParameter(auto_makeup_gain_param_name))),
       compressor_settings_listener(compressor_settings_changed) {
     setLatencySamples(fft_window_size);
 
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
     //      parameters in a group, right?
     parameters.addParameterListener(sidechain_active_param_name,
+                                    &compressor_settings_listener);
+    parameters.addParameterListener(auto_makeup_gain_param_name,
                                     &compressor_settings_listener);
 }
 
@@ -149,7 +162,7 @@ void SpectralCompressorProcessor::prepareToPlay(
     // TODO: And we should be doing both upwards and downwards compression,
     //       OTT-style
     juce::dsp::Compressor<float> compressor{};
-    compressor.setRatio(50.0);
+    compressor.setRatio(compressor_ratio);
     compressor.setAttack(50.0);
     compressor.setRelease(5000.0);
     compressor.prepare(juce::dsp::ProcessSpec{
@@ -412,16 +425,12 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 //       processing?
                 fft.performRealOnlyInverseTransform(fft_scratch_buffer.data());
 
-                // TODO: Makeup gain, and when implementing this, take into
-                //       account that the 4x overlap also multiplies the volume
-                //       by 4 so we should subtrace 6 dB from the makeup gain.
-                //       We should probably apply this when copying data from
-                //       the output ring buffer to the sample buffer.
-
                 // After processing the windowed data, we'll add it to our
-                // output ring buffer
+                // output ring buffer with any (automatic) makeup gain applied
+                // TODO: We might need some kind of optional limiting stage to
+                //       be safe
                 output_ring_buffers[channel].add_n_from_in_place(
-                    fft_scratch_buffer.data(), fft_window_size);
+                    fft_scratch_buffer.data(), fft_window_size, makeup_gain);
             }
         } else {
             for (size_t channel = 0; channel < input_channels; channel++) {
@@ -462,11 +471,12 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 }
 
 void SpectralCompressorProcessor::update_compressors() {
+    constexpr float base_threshold_dbfs = 0.0f;
+
     if (!sidechain_active) {
         // The thresholds are set to match pink noise.
         // TODO: Change the calculations so that the base threshold parameter is
         //       centered around some frequency
-        constexpr float base_threshold_dbfs = 0.0f;
         const float frequency_increment = getSampleRate() / fft_window_size;
         for (size_t compressor_idx = 0;
              compressor_idx < spectral_compressors.size(); compressor_idx++) {
@@ -483,10 +493,23 @@ void SpectralCompressorProcessor::update_compressors() {
             spectral_compressors[compressor_idx].setThreshold(threshold);
         }
     }
+
+    // We need to compensate for the extra gain added by 4x overlap
+    makeup_gain = 0.25;
+    if (auto_makeup_gain) {
+        if (sidechain_active) {
+            // Not really sure what makes sense here
+            makeup_gain *= 8.0;
+        } else {
+            // TODO: Make this smarter, make it take all of the compressor
+            //       parameters into account. It will probably start making
+            //       sense once we add parameters for the threshold and ratio.
+            makeup_gain *=
+                juce::Decibels::decibelsToGain(compressor_ratio - 1.0f);
+        }
+    }
 }
 
-//==============================================================================
-// This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
     return new SpectralCompressorProcessor();
 }

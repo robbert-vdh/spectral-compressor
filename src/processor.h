@@ -168,10 +168,16 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     std::vector<RingBuffer<float>> sidechain_ring_buffers;
 
-    // Parameters
+    // Computed parameters, set indirectly by parameters
 
-    juce::AudioProcessorValueTreeState parameters;
-    juce::AudioParameterBool& sidechain_active;
+    /**
+     * Makeup gain to be applied after compression, where 1.0 mean no gain
+     * applied. Depends on the current active modes and whether the makeup gain
+     * parameters.
+     *
+     * The computed value also takes the 4x overlap into account.
+     */
+    float makeup_gain;
 
     /**
      * Will be set in `CompressorSettingsListener` when any of the compressor
@@ -180,6 +186,16 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * first processing cycle.
      */
     std::atomic_bool compressor_settings_changed = true;
+
+    // Parameters
+
+    juce::AudioProcessorValueTreeState parameters;
+    juce::AudioParameterBool& sidechain_active;
+    /**
+     * Try to automatically compensate for low thresholds. Doesn't do anything
+     * when sidechaining is active.
+     */
+    juce::AudioParameterBool& auto_makeup_gain;
 
     // Listeners
 

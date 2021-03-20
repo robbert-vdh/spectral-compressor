@@ -142,12 +142,14 @@ class RingBuffer {
      *
      * @param src The buffer to copy from.
      * @param num How many elements to read, should not exceed `size()`.
+     * @param gain A gain multiplier before adding the values. If set to `1.0`
+     *   then no gain will be added.
      *
      * @return The number of elements copied.
      *
      * @throw std::invalid_argument When `num > size()`.
      */
-    size_t add_n_from_in_place(const T* src, size_t num) {
+    size_t add_n_from_in_place(const T* src, size_t num, float gain = 1.0) {
         if (num > buffer.size()) {
             throw std::invalid_argument(
                 "num > size() in RingBuffer::copy_n_to()");
@@ -155,9 +157,17 @@ class RingBuffer {
 
         const auto& [num_to_end, num_from_start] =
             split_range_from(current_pos, num);
-        juce::FloatVectorOperations::add(&buffer[current_pos], src, num_to_end);
-        juce::FloatVectorOperations::add(&buffer[0], src + num_to_end,
-                                         num_from_start);
+        if (gain == 1.0) {
+            juce::FloatVectorOperations::add(&buffer[current_pos], src,
+                                             num_to_end);
+            juce::FloatVectorOperations::add(&buffer[0], src + num_to_end,
+                                             num_from_start);
+        } else {
+            juce::FloatVectorOperations::addWithMultiply(&buffer[current_pos],
+                                                         src, gain, num_to_end);
+            juce::FloatVectorOperations::addWithMultiply(
+                &buffer[0], src + num_to_end, gain, num_from_start);
+        }
 
         return num;
     }
