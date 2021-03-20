@@ -112,8 +112,9 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void update_compressors();
 
     /**
-     * We'll process the signal with overlapping windows. See
-     * `input_ring_buffers` for more information on how we'll do this.
+     * We'll process the signal with overlapping windows that are added to each
+     * other to form the output signal. See `input_ring_buffers` for more
+     * information on how we'll do this.
      */
     juce::dsp::WindowingFunction<float> windowing_function;
 

@@ -331,8 +331,6 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 for (size_t channel = 0; channel < input_channels; channel++) {
                     sidechain_ring_buffers[channel].copy_last_n_to(
                         fft_scratch_buffer.data(), fft_window_size);
-                    windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_window_size);
                     // TODO: We can skip negative frequencies here, right?
                     fft.performRealOnlyForwardTransform(
                         fft_scratch_buffer.data(), true);
@@ -372,8 +370,6 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
             for (size_t channel = 0; channel < input_channels; channel++) {
                 input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.data(), fft_window_size);
-                windowing_function.multiplyWithWindowingTable(
                     fft_scratch_buffer.data(), fft_window_size);
                 fft.performRealOnlyForwardTransform(fft_scratch_buffer.data());
 
@@ -421,9 +417,9 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                     }
                 }
 
-                // TODO: Should we also use the window function after
-                //       processing?
                 fft.performRealOnlyInverseTransform(fft_scratch_buffer.data());
+                windowing_function.multiplyWithWindowingTable(
+                    fft_scratch_buffer.data(), fft_window_size);
 
                 // After processing the windowed data, we'll add it to our
                 // output ring buffer with any (automatic) makeup gain applied
