@@ -491,7 +491,7 @@ void SpectralCompressorProcessor::update_compressors() {
     }
 
     // We need to compensate for the extra gain added by 4x overlap
-    makeup_gain = 0.25;
+    makeup_gain = 1.0f / windowing_overlap_times;
     if (auto_makeup_gain) {
         if (sidechain_active) {
             // Not really sure what makes sense here

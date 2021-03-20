@@ -34,11 +34,16 @@ static_assert(1 << fft_order == fft_window_size,
               "The FFT order and FFT window sizes don't match up");
 
 /**
+ * How many times overlapping windows we process in `fft_window_size` samples.
+ */
+constexpr int windowing_overlap_times = 4;
+
+/**
  * We'll have to process the input in overlapping windows and add the processed
  * results to a resulting waveform. We'll use four times overlap, so every this
  * many samples we'll do an FFT transformation.
  */
-constexpr size_t windowing_interval = fft_window_size / 4;
+constexpr size_t windowing_interval = fft_window_size / windowing_overlap_times;
 
 /**
  * Used to signal to the audio thread that the compressors should be updated
