@@ -34,11 +34,11 @@ if(FFTW_FOUND AND NOT FORCE_STATIC_LINKING)
 else()
   message(STATUS "fftw3f not found using pkgconfig, falling back to a statically linked local build")
 
-  # TODO: Is there no way to add a checksum or something?
   CPMAddPackage(
     NAME FFTW
     VERSIOIN 3.3.9
     URL http://fftw.org/fftw-3.3.9.tar.gz
+    URL_HASH SHA256=bf2c7ce40b04ae811af714deb512510cc2c17b9ab9d6ddcf49fe4487eea7af3d
     OPTIONS
     "BUILD_SHARED_LIBS OFF"
     "BUILD_TESTS OFF"
