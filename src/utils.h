@@ -21,18 +21,32 @@
 
 /**
  * A wrapper around some resizeable type `T` that contains an active `T` and an
- * inactive `T`. When resizing, we'll resize the inactive `T`, and then set a
- * flag that will cause the active and the inactive objects to get swapped the
- * next time the audio thread requests a reference to the currently active
- * objects. This prevents locking and memory allocations on the audio thread.
- *
- * @tparam T The 'resizeable' type we should store. This has to be both move and
- *   copy constructable and assignable.
+ * inactive `T`, with a pointer pointing to the currently active object. When
+ * resizing, we'll resize the inactive `T`, and then set a flag that will cause
+ * the active and the inactive objects to get swapped the next time the audio
+ * thread requests a reference to the currently active objects. This prevents
+ * locking and memory allocations on the audio thread.
  */
 template <typename T>
 class AtomicResizable {
    public:
     /**
+     * Default initalizes the objects.
+     *
+     * @param resize_and_clear_fn This function should resize an object of type
+     *   `T` and potentially also clear its values. While not strictly
+     *   necessary, clearing may be a good idea to avoid weird pops and other
+     *   artifacts.
+     */
+    AtomicResizable(fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
+        : resize_and_clear_fn(std::move(resize_and_clear_fn)),
+          active(&primary),
+          primary(),
+          secondary() {}
+
+    /**
+     * Initialize the objects with some default value.
+     *
      * @param initial The initial value for the object. This will also be copied
      *   to the inactive slot.
      * @param resize_and_clear_fn This function should resize an object of type
@@ -43,8 +57,9 @@ class AtomicResizable {
     AtomicResizable(T initial,
                     fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
         : resize_and_clear_fn(std::move(resize_and_clear_fn)),
-          active(initial),
-          inactive(initial) {}
+          active(&primary),
+          primary(initial),
+          secondary(initial) {}
 
     /**
      * Return a reference to currently active object. This should be done at the
@@ -52,14 +67,14 @@ class AtomicResizable {
      * reused for the remainder of the function.
      */
     T& get() {
-        // We'll swap these on the audio thread so that two resizes in a row in
-        // between audio processing calls don't cause weird behaviour
+        // We'll swap the pointer on the audio thread so that two resizes in a
+        // row in between audio processing calls don't cause weird behaviour
         bool expected = true;
         if (needs_swap.compare_exchange_strong(expected, false)) {
-            std::swap(active, inactive);
+            active = active == &primary ? &secondary : &primary;
         }
 
-        return active;
+        return *active;
     }
 
     /**
@@ -72,8 +87,19 @@ class AtomicResizable {
         // In case two resizes are performed in a row, we don't want the audio
         // thread swapping the objects while we're performing a second resize
         needs_swap = false;
-        resize_and_clear_fn(inactive, new_size);
+        resize_and_clear_fn(active == &primary ? secondary : primary, new_size);
         needs_swap = true;
+    }
+
+    /**
+     * Resize both objects down to their smallest size. This should only ever be
+     * called from `AudioProcessor::releaseResources()`.
+     */
+    void clear() {
+        std::lock_guard lock(resize_mutex);
+
+        resize_and_clear_fn(primary, 0);
+        resize_and_clear_fn(secondary, 0);
     }
 
    private:
@@ -82,6 +108,7 @@ class AtomicResizable {
     std::atomic_bool needs_swap = false;
     std::mutex resize_mutex;
 
-    T active;
-    T inactive;
+    std::atomic<T*> active;
+    T primary;
+    T secondary;
 };
