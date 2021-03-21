@@ -23,6 +23,7 @@ if(NOT FORCE_STATIC_LINKING)
   find_package(PkgConfig)
   if(PkgConfig_FOUND)
     pkg_search_module(FFTW IMPORTED_TARGET fftw3f)
+    pkg_search_module(function2 IMPORTED_TARGET function2)
   endif()
 endif()
 
@@ -51,6 +52,11 @@ else()
   set_target_properties(fftw3f PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set(fftw_target fftw3f)
   set(use_static_fftw TRUE)
+endif()
+
+if(NOT function2_FOUND)
+  message(STATUS "function2 not found using pkgconfig, downloading from GitHub")
+  CPMAddPackage("gh:Naios/function2#4.1.0")
 endif()
 
 # We only expose a single VST3 plugin
@@ -104,4 +110,5 @@ target_link_libraries(SpectralCompressor
   PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
-    ${fftw_target})
+    ${fftw_target}
+    function2)
