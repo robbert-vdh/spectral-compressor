@@ -43,13 +43,9 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
               .withInput("Input", juce::AudioChannelSet::stereo(), true)
               .withOutput("Output", juce::AudioChannelSet::stereo(), true)
               .withInput("Sidechain", juce::AudioChannelSet::stereo(), true)),
-      windowing_function(
-          fft_window_size,
-          juce::dsp::WindowingFunction<float>::WindowingMethod::hann,
-          // TODO: Or should we leave normalization enabled?
-          false),
-      fft(fft_order),
-      compressor_settings_changed(true),
+      process_data([&](ProcessData& inactive, size_t new_fft_order) {
+          initialize_process_data(inactive, new_fft_order);
+      }),
       parameters(
           *this,
           nullptr,
@@ -153,56 +149,19 @@ void SpectralCompressorProcessor::prepareToPlay(
     int maximumExpectedSamplesPerBlock) {
     // TODO: The FFT settings are now fixed, we'll want to make this
     //       configurable later
-
-    // JUCE's FFT class interleaves the real and imaginary numbers, so this
-    // buffer should be twice the window size in size
-    fft_scratch_buffer.resize(fft_window_size * 2);
-
-    // Every FFT bin on both channels gets its own compressor, hooray!
-    // The `(fft_window_size / 2) - 1` is because the first bin is the DC offset
-    // and shouldn't be compressed, and the bins after the Nyquist frequency are
-    // the same as the first half but in reverse order.
-    // TODO: Make the compressor settings configurable
-    // TODO: The user should be able to configure their own slope (or free
-    //       drawn)
-    // TODO: And we should be doing both upwards and downwards compression,
-    //       OTT-style
-    juce::dsp::Compressor<float> compressor{};
-    compressor.setAttack(50.0);
-    compressor.setRelease(5000.0);
-    compressor.prepare(juce::dsp::ProcessSpec{
+    // TODO: Once the window size becomes configurable, the sample rate here and
+    //       in the compressors should also be updated
+    current_process_spec = juce::dsp::ProcessSpec{
         // We only process everything once every `windowing_interval`, otherwise
         // our attack and release times will be all messed up
         .sampleRate = sampleRate / windowing_interval,
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
-        .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
-
-    spectral_compressors.resize((fft_window_size / 2) - 1, compressor);
-    spectral_compressor_sidechain_thresholds.resize(
-        spectral_compressors.size());
-
-    // We use ring buffers to store the samples we'll process using FFT and also
-    // to store the samples that should be played back to.
-    input_ring_buffers.resize(static_cast<size_t>(getMainBusNumInputChannels()),
-                              RingBuffer<float>(fft_window_size));
-    output_ring_buffers.resize(
-        static_cast<size_t>(getMainBusNumOutputChannels()),
-        RingBuffer<float>(fft_window_size));
-    sidechain_ring_buffers.resize(
-        static_cast<size_t>(getChannelCountOfBus(true, 1)),
-        RingBuffer<float>(fft_window_size));
+        .numChannels = static_cast<uint32>(getMainBusNumInputChannels())};
+    process_data.resize_and_clear(fft_order);
 }
 
 void SpectralCompressorProcessor::releaseResources() {
-    // TODO: Clearing a vector actually doesn't really do anything. So either
-    //       don't do anything here or actually swap these vectors with new
-    //       vectors/shrink to fit.
-    fft_scratch_buffer.clear();
-    spectral_compressors.clear();
-    spectral_compressor_sidechain_thresholds.clear();
-    input_ring_buffers.clear();
-    output_ring_buffers.clear();
-    sidechain_ring_buffers.clear();
+    process_data.clear();
 }
 
 bool SpectralCompressorProcessor::isBusesLayoutSupported(
@@ -277,6 +236,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
     // We'll process audio in lockstep to make it easier to use processors that
     // require lookahead and thus induce latency
+    ProcessData& data = process_data.get();
 
     // We process incoming audio in windows of `windowing_interval`, and when
     // using non-power of 2 buffer sizes of buffers that are smaller than
@@ -284,7 +244,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     // processed audio before processing a new window
     const size_t already_processed_samples = std::min(
         num_samples, (windowing_interval -
-                      (input_ring_buffers[0].pos() % windowing_interval)) %
+                      (data.input_ring_buffers[0].pos() % windowing_interval)) %
                          windowing_interval);
     const size_t samples_to_be_processed =
         num_samples - already_processed_samples;
@@ -301,13 +261,13 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     // buffer to prevent feedback is always done in sync
     if (already_processed_samples > 0) {
         for (size_t channel = 0; channel < input_channels; channel++) {
-            input_ring_buffers[channel].read_n_from(
+            data.input_ring_buffers[channel].read_n_from(
                 main_io.getReadPointer(channel), already_processed_samples);
-            output_ring_buffers[channel].copy_n_to(
+            data.output_ring_buffers[channel].copy_n_to(
                 main_io.getWritePointer(channel), already_processed_samples,
                 true);
             if (sidechain_active) {
-                sidechain_ring_buffers[channel].read_n_from(
+                data.sidechain_ring_buffers[channel].read_n_from(
                     sidechain_io.getReadPointer(channel),
                     already_processed_samples);
             }
@@ -321,7 +281,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     bool expected = true;
     if (windows_to_process > 0 &&
         compressor_settings_changed.compare_exchange_strong(expected, false)) {
-        update_compressors();
+        update_compressors(data);
     }
 
     // Now if `windows_to_process > 0`, the current ring buffer position will
@@ -334,19 +294,19 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
             // based we don't need any additional smoothing here.
             if (sidechain_active) {
                 for (size_t channel = 0; channel < input_channels; channel++) {
-                    sidechain_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.data(), fft_window_size);
+                    data.sidechain_ring_buffers[channel].copy_last_n_to(
+                        data.fft_scratch_buffer.data(), data.fft_window_size);
                     // TODO: We can skip negative frequencies here, right?
-                    fft.performRealOnlyForwardTransform(
-                        fft_scratch_buffer.data(), true);
+                    data.fft->performRealOnlyForwardTransform(
+                        data.fft_scratch_buffer.data(), true);
 
                     // The version below is better annotated
                     std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
-                            fft_scratch_buffer.data()),
-                        fft_window_size);
+                            data.fft_scratch_buffer.data()),
+                        data.fft_window_size);
                     for (size_t compressor_idx = 0;
-                         compressor_idx < spectral_compressors.size();
+                         compressor_idx < data.spectral_compressors.size();
                          compressor_idx++) {
                         const size_t bin_idx = compressor_idx + 1;
                         const float magnitude = std::abs(fft_buffer[bin_idx]);
@@ -356,27 +316,28 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                         // a slight premature optimization (sorry) we'll reset
                         // these magnitudes after using them to avoid the
                         // conditional here.
-                        spectral_compressor_sidechain_thresholds
+                        data.spectral_compressor_sidechain_thresholds
                             [compressor_idx] += magnitude;
                     }
                 }
 
                 for (size_t compressor_idx = 0;
-                     compressor_idx < spectral_compressors.size();
+                     compressor_idx < data.spectral_compressors.size();
                      compressor_idx++) {
-                    spectral_compressors[compressor_idx].setThreshold(
-                        spectral_compressor_sidechain_thresholds
+                    data.spectral_compressors[compressor_idx].setThreshold(
+                        data.spectral_compressor_sidechain_thresholds
                             [compressor_idx] /
                         input_channels);
-                    spectral_compressor_sidechain_thresholds[compressor_idx] =
-                        0;
+                    data.spectral_compressor_sidechain_thresholds
+                        [compressor_idx] = 0;
                 }
             }
 
             for (size_t channel = 0; channel < input_channels; channel++) {
-                input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.data(), fft_window_size);
-                fft.performRealOnlyForwardTransform(fft_scratch_buffer.data());
+                data.input_ring_buffers[channel].copy_last_n_to(
+                    data.fft_scratch_buffer.data(), data.fft_window_size);
+                data.fft->performRealOnlyForwardTransform(
+                    data.fft_scratch_buffer.data());
 
                 // We'll compress every FTT bin individually. Bin 0 is the DC
                 // offset and should be skipped, and the latter half of the FFT
@@ -387,10 +348,10 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // complex value functions.
                 std::span<std::complex<float>> fft_buffer(
                     reinterpret_cast<std::complex<float>*>(
-                        fft_scratch_buffer.data()),
-                    fft_window_size);
+                        data.fft_scratch_buffer.data()),
+                    data.fft_window_size);
                 for (size_t compressor_idx = 0;
-                     compressor_idx < spectral_compressors.size();
+                     compressor_idx < data.spectral_compressors.size();
                      compressor_idx++) {
                     // We don't have a compressor for the first bin
                     const size_t bin_idx = compressor_idx + 1;
@@ -399,7 +360,7 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                     //       half ergo this single magnitude is sufficient?
                     const float magnitude = std::abs(fft_buffer[bin_idx]);
                     const float compressed_magnitude =
-                        spectral_compressors[compressor_idx].processSample(
+                        data.spectral_compressors[compressor_idx].processSample(
                             channel, magnitude);
 
                     // We need to scale both the imaginary and real components
@@ -415,23 +376,26 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                     // last bin
                     fft_buffer[bin_idx] *= compression_multiplier;
                     // TODO: Is this mirrored part necessary?
-                    if (compressor_idx != spectral_compressors.size() - 1) {
+                    if (compressor_idx !=
+                        data.spectral_compressors.size() - 1) {
                         const size_t mirrored_bin_idx =
-                            fft_window_size - bin_idx;
+                            data.fft_window_size - bin_idx;
                         fft_buffer[mirrored_bin_idx] *= compression_multiplier;
                     }
                 }
 
-                fft.performRealOnlyInverseTransform(fft_scratch_buffer.data());
-                windowing_function.multiplyWithWindowingTable(
-                    fft_scratch_buffer.data(), fft_window_size);
+                data.fft->performRealOnlyInverseTransform(
+                    data.fft_scratch_buffer.data());
+                data.windowing_function->multiplyWithWindowingTable(
+                    data.fft_scratch_buffer.data(), data.fft_window_size);
 
                 // After processing the windowed data, we'll add it to our
                 // output ring buffer with any (automatic) makeup gain applied
                 // TODO: We might need some kind of optional limiting stage to
                 //       be safe
-                output_ring_buffers[channel].add_n_from_in_place(
-                    fft_scratch_buffer.data(), fft_window_size, makeup_gain);
+                data.output_ring_buffers[channel].add_n_from_in_place(
+                    data.fft_scratch_buffer.data(), data.fft_window_size,
+                    makeup_gain);
             }
         } else {
             for (size_t channel = 0; channel < input_channels; channel++) {
@@ -440,10 +404,10 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
                 // anyways
                 // TODO: At some point, do implement this without using the
                 //       scratch buffer
-                input_ring_buffers[channel].copy_last_n_to(
-                    fft_scratch_buffer.data(), fft_window_size);
-                output_ring_buffers[channel].read_n_from_in_place(
-                    fft_scratch_buffer.data(), fft_window_size);
+                data.input_ring_buffers[channel].copy_last_n_to(
+                    data.fft_scratch_buffer.data(), data.fft_window_size);
+                data.output_ring_buffers[channel].read_n_from_in_place(
+                    data.fft_scratch_buffer.data(), data.fft_window_size);
             }
         }
 
@@ -452,14 +416,14 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
         const size_t samples_to_process_this_iteration =
             std::min(windowing_interval, num_samples - sample_buffer_offset);
         for (size_t channel = 0; channel < input_channels; channel++) {
-            input_ring_buffers[channel].read_n_from(
+            data.input_ring_buffers[channel].read_n_from(
                 main_io.getReadPointer(channel) + sample_buffer_offset,
                 samples_to_process_this_iteration);
-            output_ring_buffers[channel].copy_n_to(
+            data.output_ring_buffers[channel].copy_n_to(
                 main_io.getWritePointer(channel) + sample_buffer_offset,
                 samples_to_process_this_iteration, true);
             if (sidechain_active) {
-                sidechain_ring_buffers[channel].read_n_from(
+                data.sidechain_ring_buffers[channel].read_n_from(
                     sidechain_io.getReadPointer(channel) + sample_buffer_offset,
                     samples_to_process_this_iteration);
             }
@@ -471,21 +435,98 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     jassert(sample_buffer_offset == num_samples);
 }
 
-void SpectralCompressorProcessor::update_compressors() {
+void SpectralCompressorProcessor::initialize_process_data(
+    ProcessData& inactive,
+    size_t new_fft_order) {
+    inactive.fft_window_size = 1 << new_fft_order;
+
+    if (fft_order > 0) {
+        inactive.windowing_function.emplace(
+            inactive.fft_window_size,
+            juce::dsp::WindowingFunction<float>::WindowingMethod::hann,
+            // TODO: Or should we leave normalization enabled?
+            false);
+        inactive.fft.emplace(new_fft_order);
+    } else {
+        inactive.windowing_function.reset();
+        inactive.fft.reset();
+    }
+
+    // To prevent pops and artifacts caused by old samples, we'll clear all of
+    // our buffers on a resize
+    inactive.fft_scratch_buffer.clear();
+    inactive.spectral_compressors.clear();
+    inactive.spectral_compressor_sidechain_thresholds.clear();
+    inactive.input_ring_buffers.clear();
+    inactive.output_ring_buffers.clear();
+    inactive.sidechain_ring_buffers.clear();
+    if (new_fft_order <= 0) {
+        inactive.fft_scratch_buffer.shrink_to_fit();
+        inactive.spectral_compressors.shrink_to_fit();
+        inactive.spectral_compressor_sidechain_thresholds.shrink_to_fit();
+        inactive.input_ring_buffers.shrink_to_fit();
+        inactive.output_ring_buffers.shrink_to_fit();
+        inactive.sidechain_ring_buffers.shrink_to_fit();
+        return;
+    }
+
+    // JUCE's FFT class interleaves the real and imaginary numbers, so this
+    // buffer should be twice the window size in size
+    inactive.fft_scratch_buffer.resize(inactive.fft_window_size * 2);
+
+    // Every FFT bin on both channels gets its own compressor, hooray!  The
+    // `(fft_window_size / 2) - 1` is because the first bin is the DC offset and
+    // shouldn't be compressed, and the bins after the Nyquist frequency are the
+    // same as the first half but in reverse order.
+    // TODO: Make the compressor settings configurable
+    // TODO: The user should be able to configure their own slope (or free
+    //       drawn)
+    // TODO: And we should be doing both upwards and downwards compression,
+    //       OTT-style
+    juce::dsp::Compressor<float> compressor{};
+    compressor.setAttack(50.0);
+    compressor.setRelease(5000.0);
+    compressor.prepare(current_process_spec);
+
+    inactive.spectral_compressors.resize((inactive.fft_window_size / 2) - 1,
+                                         compressor);
+    inactive.spectral_compressor_sidechain_thresholds.resize(
+        inactive.spectral_compressors.size());
+
+    // We use ring buffers to store the samples we'll process using FFT and also
+    // to store the samples that should be played back to
+    inactive.input_ring_buffers.resize(
+        static_cast<size_t>(getMainBusNumInputChannels()),
+        RingBuffer<float>(inactive.fft_window_size));
+    inactive.output_ring_buffers.resize(
+        static_cast<size_t>(getMainBusNumOutputChannels()),
+        RingBuffer<float>(inactive.fft_window_size));
+    inactive.sidechain_ring_buffers.resize(
+        static_cast<size_t>(getChannelCountOfBus(true, 1)),
+        RingBuffer<float>(inactive.fft_window_size));
+
+    // After resizing the compressors are uninitialized and should be
+    // reinitialized
+    compressor_settings_changed = true;
+}
+
+void SpectralCompressorProcessor::update_compressors(ProcessData& data) {
     constexpr float base_threshold_dbfs = 0.0f;
 
     for (size_t compressor_idx = 0;
-         compressor_idx < spectral_compressors.size(); compressor_idx++) {
-        spectral_compressors[compressor_idx].setRatio(compressor_ratio);
+         compressor_idx < data.spectral_compressors.size(); compressor_idx++) {
+        data.spectral_compressors[compressor_idx].setRatio(compressor_ratio);
     }
 
     if (!sidechain_active) {
         // The thresholds are set to match pink noise.
         // TODO: Change the calculations so that the base threshold parameter is
         //       centered around some frequency
-        const float frequency_increment = getSampleRate() / fft_window_size;
+        const float frequency_increment =
+            getSampleRate() / data.fft_window_size;
         for (size_t compressor_idx = 0;
-             compressor_idx < spectral_compressors.size(); compressor_idx++) {
+             compressor_idx < data.spectral_compressors.size();
+             compressor_idx++) {
             // The first bin doesn't get a compressor
             const size_t bin_idx = compressor_idx + 1;
             const float frequency = frequency_increment * bin_idx;
@@ -496,7 +537,7 @@ void SpectralCompressorProcessor::update_compressors() {
             // The 3 dB is to compensate for bin 0
             const float threshold =
                 (base_threshold_dbfs + 3.0f) - (3.0f * octave);
-            spectral_compressors[compressor_idx].setThreshold(threshold);
+            data.spectral_compressors[compressor_idx].setThreshold(threshold);
         }
     }
 

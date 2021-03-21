@@ -20,11 +20,8 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "ring.h"
+#include "utils.h"
 
-/**
- * The number of samples in our FFT window.
- */
-constexpr int fft_window_size = 4096;
 /**
  * `log2(fft_window_size)`, used to create the FFT processor.
  *
@@ -33,9 +30,10 @@ constexpr int fft_window_size = 4096;
  *       being 12 (4096 samples)
  */
 constexpr int fft_order = 12;
-
-static_assert(1 << fft_order == fft_window_size,
-              "The FFT order and FFT window sizes don't match up");
+/**
+ * The number of samples in our FFT window.
+ */
+constexpr size_t fft_window_size = 1 << fft_order;
 
 /**
  * How many times overlapping windows we process in `fft_window_size` samples.
@@ -54,6 +52,79 @@ constexpr int windowing_overlap_times = 4;
  * many samples we'll do an FFT transformation.
  */
 constexpr size_t windowing_interval = fft_window_size / windowing_overlap_times;
+
+/**
+ * All of the buffers, compressors and other miscellaneous object we'll need to
+ * do our FFT audio processing. This will be used together with
+ * `AtomicResizable<T>` so it can be resized depending on the current FFT window
+ * settings.
+ */
+struct ProcessData {
+    /**
+     * The size of the FFT window used in this `ProcessData` object. We store
+     * this here so that we always refer to the correct window size when doing
+     * swaps.
+     */
+    size_t fft_window_size;
+
+    /**
+     * We'll process the signal with overlapping windows that are added to each
+     * other to form the output signal. See `input_ring_buffers` for more
+     * information on how we'll do this.
+     */
+    std::optional<juce::dsp::WindowingFunction<float>> windowing_function;
+
+    /**
+     * The FFT processor.
+     */
+    std::optional<juce::dsp::FFT> fft;
+
+    /**
+     * We need a scratch buffer that can contain `fft_window_size * 2` samples.
+     */
+    std::vector<float> fft_scratch_buffer;
+
+    /**
+     * This will contain `(fft_window_size / 2) - 1` compressors. The
+     * compressors are already multichannel so we don't need a nested vector
+     * here. We'll compress the magnitude of every FFT bin (`sqrt(i^2 + r^2)`)
+     * individually, and then scale both the real and imaginary components by
+     * the ratio of their magnitude and the compressed value. Bin 0 is the DC
+     * offset and the bins in the second half should be processed the same was
+     * as the bins in the first half but mirrored.
+     */
+    std::vector<juce::dsp::Compressor<float>> spectral_compressors;
+
+    /**
+     * When setting compressor thresholds based on a sidechain signal we should
+     * be taking the average bin magnitudes of all channels. This buffer
+     * accumulates `spectral_compressors.size()` threshold values while
+     * iterating over the channels of the sidechain signal so we can then
+     * average them and configure the compressors based on that.
+     */
+    std::vector<float> spectral_compressor_sidechain_thresholds;
+
+    /**
+     * A ring buffer of size `fft_window_size` for every channel. Every
+     * `windowing_interval` we'll copy the last `fft_window_size` samples to
+     * `fft_scratch_buffers` using a window function, process it, and then add
+     * the results to `output_ring_buffers`.
+     */
+    std::vector<RingBuffer<float>> input_ring_buffers;
+    /**
+     * The processed results as described in the docstring of
+     * `input_ring_buffers`. Samples from this buffer will be written to the
+     * output.
+     */
+    std::vector<RingBuffer<float>> output_ring_buffers;
+    /**
+     * These ring buffers are identical to `input_ring_buffers`, but with data
+     * from the sidechain input. When sidechaining is enabled, we set the
+     * compressor thresholds based on the magnitudes from the same FFT analysis
+     * applied to the sidechain input.
+     */
+    std::vector<RingBuffer<float>> sidechain_ring_buffers;
+};
 
 /**
  * Used to signal to the audio thread that the compressors should be updated
@@ -111,8 +182,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void setStateInformation(const void* data, int sizeInBytes) override;
 
    private:
-    // We need this stuff for our DSP
-
     /**
      * Process audio. When the plugin is bypassed we should still compensate for
      * the altency, so if `bypassed` is true we handle audio the exact same way
@@ -121,68 +190,29 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void process(juce::AudioBuffer<float>& buffer, bool bypassed);
 
     /**
+     * (Re)initialize a process data object for the given FFT order. If the new
+     * FFT order is 0, then the object will be cleared instead.
+     */
+    void initialize_process_data(ProcessData& inactive, size_t new_fft_order);
+
+    /**
      * Calculate new compressor thresholds and other settings based on the
      * current parameters.
      */
-    void update_compressors();
+    void update_compressors(ProcessData& data);
 
     /**
-     * We'll process the signal with overlapping windows that are added to each
-     * other to form the output signal. See `input_ring_buffers` for more
-     * information on how we'll do this.
+     * This contains all of our scratch buffers, ring buffers, compressors, and
+     * everything else that depends on the FFT window size.
      */
-    juce::dsp::WindowingFunction<float> windowing_function;
+    AtomicResizable<ProcessData> process_data;
 
     /**
-     * The FFT processor.
+     * Will be set during `prepareToPlay()`, needed to initialize compressors
+     * when resizing our buffers. The sample rate is divided by the window
+     * interval to compensate for the windowed processing.
      */
-    juce::dsp::FFT fft;
-
-    /**
-     * We need a scratch buffer that can contain `fft_window_size * 2` samples.
-     */
-    std::vector<float> fft_scratch_buffer;
-
-    /**
-     * This will contain `(fft_window_size / 2) - 1` compressors. The
-     * compressors are already multichannel so we don't need a nested vector
-     * here. We'll compress the magnitude of every FFT bin (`sqrt(i^2 + r^2)`)
-     * individually, and then scale both the real and imaginary components by
-     * the ratio of their magnitude and the compressed value. Bin 0 is the DC
-     * offset and the bins in the second half should be processed the same was
-     * as the bins in the first half but mirrored.
-     */
-    std::vector<juce::dsp::Compressor<float>> spectral_compressors;
-
-    /**
-     * When setting compressor thresholds based on a sidechain signal we should
-     * be taking the average bin magnitudes of all channels. This buffer
-     * accumulates `spectral_compressors.size()` threshold values while
-     * iterating over the channels of the sidechain signal so we can then
-     * average them and configure the compressors based on that.
-     */
-    std::vector<float> spectral_compressor_sidechain_thresholds;
-
-    /**
-     * A ring buffer of size `fft_window_size` for every channel. Every
-     * `windowing_interval` we'll copy the last `fft_window_size` samples to
-     * `fft_scratch_buffers` using a window function, process it, and then add
-     * the results to `output_ring_buffers`.
-     */
-    std::vector<RingBuffer<float>> input_ring_buffers;
-    /**
-     * The processed results as described in the docstring of
-     * `input_ring_buffers`. Samples from this buffer will be written to the
-     * output.
-     */
-    std::vector<RingBuffer<float>> output_ring_buffers;
-    /**
-     * These ring buffers are identical to `input_ring_buffers`, but with data
-     * from the sidechain input. When sidechaining is enabled, we set the
-     * compressor thresholds based on the magnitudes from the same FFT analysis
-     * applied to the sidechain input.
-     */
-    std::vector<RingBuffer<float>> sidechain_ring_buffers;
+    juce::dsp::ProcessSpec current_process_spec;
 
     // Computed parameters, set indirectly by parameters
 

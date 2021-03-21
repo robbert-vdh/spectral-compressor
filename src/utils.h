@@ -34,9 +34,9 @@ class AtomicResizable {
      * Default initalizes the objects.
      *
      * @param resize_and_clear_fn This function should resize an object of type
-     *   `T` and potentially also clear its values. While not strictly
-     *   necessary, clearing may be a good idea to avoid weird pops and other
-     *   artifacts.
+     *   `T` and potentially also clear its values. A new size of 0 means that
+     *   the object has to release its resources. While not strictly necessary,
+     *   clearing may be a good idea to avoid weird pops and other artifacts.
      */
     AtomicResizable(fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
         : resize_and_clear_fn(std::move(resize_and_clear_fn)),
@@ -50,9 +50,9 @@ class AtomicResizable {
      * @param initial The initial value for the object. This will also be copied
      *   to the inactive slot.
      * @param resize_and_clear_fn This function should resize an object of type
-     *   `T` and potentially also clear its values. While not strictly
-     *   necessary, clearing may be a good idea to avoid weird pops and other
-     *   artifacts.
+     *   `T` and potentially also clear its values. A new size of 0 means that
+     *   the object has to release its resources. While not strictly necessary,
+     *   clearing may be a good idea to avoid weird pops and other artifacts.
      */
     AtomicResizable(T initial,
                     fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
