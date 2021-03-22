@@ -82,21 +82,20 @@ class AtomicResizable {
      * from the audio thread.
      */
     void resize_and_clear(size_t new_size) {
-        std::lock_guard lock(resize_mutex);
-
         // In case two resizes are performed in a row, we don't want the audio
         // thread swapping the objects while we're performing a second resize
-        // TODO: This also isn't entirely safe, although it does require all the
-        //       stars to be aligned for this to cause an issue. If a background
-        //       thread calls this function once, and then calls it again, then
-        //       it can happen that the audio thread does a CaS on `needs_swap`
-        //       and starts swapping the pointers in the small time span that
-        //       `needs_swap` is set to true. This could cause us to call
-        //       `resize_and_clear_fn()` on the same object that gets passed to
-        //       the audio thread.
+        num_resizing_threads.fetch_add(1);
         needs_swap = false;
+
+        std::lock_guard lock(resize_mutex);
         resize_and_clear_fn(active == &primary ? secondary : primary, new_size);
-        needs_swap = true;
+
+        // If for whatever reason multiple threads are calling this function at
+        // the same time, then only the last one may set the swap flag to
+        // prevent (admittedly super rare) data races
+        if (num_resizing_threads.fetch_sub(1) == 1) {
+            needs_swap = true;
+        }
     }
 
     /**
@@ -113,9 +112,20 @@ class AtomicResizable {
    private:
     fu2::unique_function<void(T&, size_t)> resize_and_clear_fn;
 
-    std::atomic_bool needs_swap = false;
+    /**
+     * In the unlikely situation that two threads are calling resize at the same
+     * time, we'll use a mutex to make sure that those two resizes aren't
+     * happening at the same time and we use this `num_resizing_threads` to make
+     * sure that `needs_swap` only gets set to `true` when both threads are
+     * done. This is to prevent a (super rare) race condition where the audio
+     * thread will CaS `needs_swap` to false and swap the active pointer while
+     * at the same time another who just got access to the resize mutex is
+     * working on the now active object.
+     */
+    std::atomic_int num_resizing_threads = 0;
     std::mutex resize_mutex;
 
+    std::atomic_bool needs_swap = false;
     std::atomic<T*> active;
     T primary;
     T secondary;
