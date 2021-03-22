@@ -27,14 +27,13 @@ constexpr char sidechain_active_param_name[] = "sidechain_active";
 constexpr char compressor_ratio_param_name[] = "compressor_ratio";
 constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
-CompressorSettingsListener::CompressorSettingsListener(
-    std::atomic_bool& compressor_settings_changed)
-    : compressor_settings_changed(compressor_settings_changed) {}
+LambdaParameterListener::LambdaParameterListener(
+    fu2::unique_function<void(const juce::String&, float)> callback)
+    : callback(std::move(callback)) {}
 
-void CompressorSettingsListener::parameterChanged(
-    const juce::String& /*parameterID*/,
-    float /*newValue*/) {
-    compressor_settings_changed = true;
+void LambdaParameterListener::parameterChanged(const juce::String& parameterID,
+                                               float newValue) {
+    callback(parameterID, newValue);
 }
 
 SpectralCompressorProcessor::SpectralCompressorProcessor()
@@ -77,7 +76,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           *parameters.getRawParameterValue(compressor_ratio_param_name)),
       auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(auto_makeup_gain_param_name))),
-      compressor_settings_listener(compressor_settings_changed) {
+      compressor_settings_listener(
+          [&](const juce::String& /*parameterID*/, float /*newValue*/) {
+              compressor_settings_changed = true;
+          }) {
     setLatencySamples(fft_window_size);
 
     // XXX: There doesn't seem to be a fool proof way to just iterate over all

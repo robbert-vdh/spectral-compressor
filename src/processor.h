@@ -127,22 +127,22 @@ struct ProcessData {
 };
 
 /**
- * Used to signal to the audio thread that the compressors should be updated
- * first. This contains a reference to the `compressor_settings_changed` field
- * of the processor.
+ * Run some function whenever a parameter changes. This function will be
+ * executed synchronously and should thus run in constant time.
  */
-class CompressorSettingsListener
+class LambdaParameterListener
     : public juce::AudioProcessorValueTreeState::Listener {
    public:
-    CompressorSettingsListener(std::atomic_bool& compressor_settings_changed);
+    LambdaParameterListener(
+        fu2::unique_function<void(const juce::String&, float)> callback);
 
     void parameterChanged(const juce::String& parameterID,
                           float newValue) override;
 
    private:
-    std::atomic_bool& compressor_settings_changed;
+    fu2::unique_function<void(const juce::String&, float)> callback;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CompressorSettingsListener)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LambdaParameterListener)
 };
 
 class SpectralCompressorProcessor : public juce::AudioProcessor {
@@ -246,7 +246,7 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
     // Listeners
 
-    CompressorSettingsListener compressor_settings_listener;
+    LambdaParameterListener compressor_settings_listener;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };
