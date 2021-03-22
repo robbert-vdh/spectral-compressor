@@ -86,6 +86,14 @@ class AtomicResizable {
 
         // In case two resizes are performed in a row, we don't want the audio
         // thread swapping the objects while we're performing a second resize
+        // TODO: This also isn't entirely safe, although it does require all the
+        //       stars to be aligned for this to cause an issue. If a background
+        //       thread calls this function once, and then calls it again, then
+        //       it can happen that the audio thread does a CaS on `needs_swap`
+        //       and starts swapping the pointers in the small time span that
+        //       `needs_swap` is set to true. This could cause us to call
+        //       `resize_and_clear_fn()` on the same object that gets passed to
+        //       the audio thread.
         needs_swap = false;
         resize_and_clear_fn(active == &primary ? secondary : primary, new_size);
         needs_swap = true;
