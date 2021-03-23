@@ -17,7 +17,7 @@ endif()
 # whether the package is available locally with pkgconfig before trying to
 # download and build it ourselves.
 include(cmake/CPM.cmake)
-CPMAddPackage("gh:juce-framework/JUCE#6.0.7")
+CPMAddPackage("gh:juce-framework/JUCE#6.0.8")
 
 if(NOT FORCE_STATIC_LINKING)
   find_package(PkgConfig)
