@@ -55,6 +55,13 @@ struct ProcessData {
     size_t windowing_interval;
 
     /**
+     * The numbers of windows already processed. We use this to reduce clicks by
+     * not copying over audio to the output during the first
+     * `windowing_overap_times` windows.
+     */
+    size_t num_windows_processed;
+
+    /**
      * We'll process the signal with overlapping windows that are added to each
      * other to form the output signal. See `input_ring_buffers` for more
      * information on how we'll do this.

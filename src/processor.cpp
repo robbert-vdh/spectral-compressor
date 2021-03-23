@@ -321,9 +321,13 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
         for (size_t channel = 0; channel < input_channels; channel++) {
             data.input_ring_buffers[channel].read_n_from(
                 main_io.getReadPointer(channel), already_processed_samples);
-            data.output_ring_buffers[channel].copy_n_to(
-                main_io.getWritePointer(channel), already_processed_samples,
-                true);
+            if (data.num_windows_processed >= windowing_overlap_times) {
+                data.output_ring_buffers[channel].copy_n_to(
+                    main_io.getWritePointer(channel), already_processed_samples,
+                    true);
+            } else {
+                main_io.clear(channel, 0, already_processed_samples);
+            }
             if (sidechain_active) {
                 data.sidechain_ring_buffers[channel].read_n_from(
                     sidechain_io.getReadPointer(channel),
@@ -469,6 +473,10 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
             }
         }
 
+        // We don't copy over anything to the outputs until we processed a full
+        // buffer
+        data.num_windows_processed += 1;
+
         // Copy the input audio into our ring buffer and copy the processed
         // audio into the output buffer
         const size_t samples_to_process_this_iteration = std::min(
@@ -477,9 +485,14 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
             data.input_ring_buffers[channel].read_n_from(
                 main_io.getReadPointer(channel) + sample_buffer_offset,
                 samples_to_process_this_iteration);
-            data.output_ring_buffers[channel].copy_n_to(
-                main_io.getWritePointer(channel) + sample_buffer_offset,
-                samples_to_process_this_iteration, true);
+            if (data.num_windows_processed >= windowing_overlap_times) {
+                data.output_ring_buffers[channel].copy_n_to(
+                    main_io.getWritePointer(channel) + sample_buffer_offset,
+                    samples_to_process_this_iteration, true);
+            } else {
+                main_io.clear(channel, sample_buffer_offset,
+                              samples_to_process_this_iteration);
+            }
             if (sidechain_active) {
                 data.sidechain_ring_buffers[channel].read_n_from(
                     sidechain_io.getReadPointer(channel) + sample_buffer_offset,
@@ -499,6 +512,7 @@ void SpectralCompressorProcessor::initialize_process_data(
     inactive.fft_window_size = 1 << new_fft_order;
     inactive.windowing_interval =
         inactive.fft_window_size / windowing_overlap_times;
+    inactive.num_windows_processed = 0;
 
     if (fft_order > 0) {
         inactive.windowing_function.emplace(
