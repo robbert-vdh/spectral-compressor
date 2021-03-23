@@ -114,7 +114,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
               process_data_resizer.triggerAsyncUpdate();
               // FIXME: This should be done asynchronously, but this only works
               //        while the editor is open
-              process_data_resizer.handleUpdateNowIfNeeded();
+              //        https://forum.juce.com/t/messages-are-only-being-handled-while-the-editor-is-open/45165/7
+              if (!(getActiveEditor() && getActiveEditor()->isShowing())) {
+                  process_data_resizer.handleUpdateNowIfNeeded();
+              }
           }),
       process_data_resizer([&]() {
           process_data.resize_and_clear(static_cast<size_t>(fft_order));
