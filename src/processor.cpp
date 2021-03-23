@@ -201,7 +201,12 @@ void SpectralCompressorProcessor::prepareToPlay(
     double /*sampleRate*/,
     int maximumExpectedSamplesPerBlock) {
     max_samples_per_block = static_cast<uint32>(maximumExpectedSamplesPerBlock);
-    process_data.resize_and_clear(static_cast<size_t>(fft_order));
+
+    // We're explicitly initialzing the process data instead of using the resize
+    // and clear here since resize_and_clear will temporarily set the resize
+    // flag to false, and if `process_data_resizer` procs just before the first
+    // block of audio gets processed then the swap never gets performed
+    initialize_process_data(process_data.get(), static_cast<size_t>(fft_order));
 }
 
 void SpectralCompressorProcessor::releaseResources() {
