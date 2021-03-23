@@ -48,18 +48,11 @@ struct ProcessData {
     size_t fft_window_size;
 
     /**
-     * We'll have to process the input in overlapping windows and add the
-     * processed results to a resulting waveform. We'll use four times overlap,
-     * so every this many samples we'll do an FFT transformation.
-     */
-    size_t windowing_interval;
-
-    /**
      * The numbers of windows already processed. We use this to reduce clicks by
      * not copying over audio to the output during the first
      * `windowing_overap_times` windows.
      */
-    size_t num_windows_processed;
+    int num_windows_processed;
 
     /**
      * We'll process the signal with overlapping windows that are added to each
@@ -255,6 +248,14 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * atomically swap the current and the resized buffers.
      */
     juce::AudioParameterInt& fft_order;
+    /**
+     * The amount of overlap in the windowing. We end up processing the signal
+     * in `fft_window_size` windows every `fft_window_size /
+     * windowing_overlap_times` samples. When this setting gets changed, we'll
+     * also have to update our compressors since the effective sample rate also
+     * changes.
+     */
+    juce::AudioParameterInt& windowing_overlap_times;
 
     /**
      * Will cause the compressor settings to be updated on the next processing

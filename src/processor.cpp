@@ -29,6 +29,7 @@ constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
 constexpr char spectral_settings_group_name[] = "spectral";
 constexpr char fft_order_param_name[] = "fft_size";
+constexpr char windowing_overlap_times_param_name[] = "windowing_times";
 
 LambdaAsyncUpdater::LambdaAsyncUpdater(fu2::unique_function<void()> callback)
     : callback(std::move(callback)) {}
@@ -93,7 +94,23 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       },
                       [](const juce::String& text) -> int {
                           return std::log2(text.getIntValue());
-                      })),
+                      }),
+                  // TODO: Change this to disallow non-power of 2 values
+                  std::make_unique<juce::AudioParameterInt>(
+                      windowing_overlap_times_param_name,
+                      "Time Resolution",
+                      2,
+                      64,
+                      4,
+                      "x"
+                      // TODO: We should show this in the GUI
+                      // [&](int value, int /*max_length*/) -> juce::String {
+                      //     return juce::String((1 << fft_order) / value);
+                      // },
+                      // [&](const juce::String& text) -> int {
+                      //     return (1 << fft_order) / text.getIntValue();
+                      // }
+                      )),
           }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
@@ -105,6 +122,8 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           parameters.getParameter(auto_makeup_gain_param_name))),
       fft_order(*dynamic_cast<juce::AudioParameterInt*>(
           parameters.getParameter(fft_order_param_name))),
+      windowing_overlap_times(*dynamic_cast<juce::AudioParameterInt*>(
+          parameters.getParameter(windowing_overlap_times_param_name))),
       compressor_settings_listener(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
               compressor_settings_changed = true;
@@ -122,6 +141,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
       process_data_resizer([&]() {
           process_data.resize_and_clear(static_cast<size_t>(fft_order));
 
+          // The window size will also have changed, and we should thus update
+          // our compressors to match the new effective sample rate.
+          compressor_settings_changed = true;
+
           // TODO: The window size has to be changed after we change the FFT
           //       window size
           const size_t new_window_size = 1 << fft_order;
@@ -135,7 +158,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
     //      parameters in a group, right?
     for (const auto& compressor_param_name :
          {sidechain_active_param_name, compressor_ratio_param_name,
-          auto_makeup_gain_param_name}) {
+          auto_makeup_gain_param_name, windowing_overlap_times_param_name}) {
         parameters.addParameterListener(compressor_param_name,
                                         &compressor_settings_listener);
     }
@@ -295,19 +318,23 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     // require lookahead and thus induce latency
     ProcessData& data = process_data.get();
 
+    // Every this many samples we'll process a new window of input samples. The
+    // results will be added to the output ring buffers.
+    const size_t windowing_interval =
+        data.fft_window_size / static_cast<size_t>(windowing_overlap_times);
+
     // We process incoming audio in windows of `windowing_interval`, and when
     // using non-power of 2 buffer sizes of buffers that are smaller than
     // `windowing_interval` it can happen that we have to copy over already
     // processed audio before processing a new window
     const size_t already_processed_samples = std::min(
-        num_samples,
-        (data.windowing_interval -
-         (data.input_ring_buffers[0].pos() % data.windowing_interval)) %
-            data.windowing_interval);
+        num_samples, (windowing_interval -
+                      (data.input_ring_buffers[0].pos() % windowing_interval)) %
+                         windowing_interval);
     const size_t samples_to_be_processed =
         num_samples - already_processed_samples;
     const int windows_to_process = std::ceil(
-        static_cast<float>(samples_to_be_processed) / data.windowing_interval);
+        static_cast<float>(samples_to_be_processed) / windowing_interval);
 
     // Since we're processing audio in small chunks, we need to keep track of
     // the current sample offset in `buffers` we should use for our actual audio
@@ -479,8 +506,8 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
         // Copy the input audio into our ring buffer and copy the processed
         // audio into the output buffer
-        const size_t samples_to_process_this_iteration = std::min(
-            data.windowing_interval, num_samples - sample_buffer_offset);
+        const size_t samples_to_process_this_iteration =
+            std::min(windowing_interval, num_samples - sample_buffer_offset);
         for (size_t channel = 0; channel < input_channels; channel++) {
             data.input_ring_buffers[channel].read_n_from(
                 main_io.getReadPointer(channel) + sample_buffer_offset,
@@ -510,8 +537,6 @@ void SpectralCompressorProcessor::initialize_process_data(
     ProcessData& inactive,
     size_t new_fft_order) {
     inactive.fft_window_size = 1 << new_fft_order;
-    inactive.windowing_interval =
-        inactive.fft_window_size / windowing_overlap_times;
     inactive.num_windows_processed = 0;
 
     if (fft_order > 0) {
@@ -565,7 +590,9 @@ void SpectralCompressorProcessor::initialize_process_data(
     compressor.prepare(juce::dsp::ProcessSpec{
         // We only process everything once every `windowing_interval`, otherwise
         // our attack and release times will be all messed up
-        .sampleRate = getSampleRate() / inactive.windowing_interval,
+        .sampleRate =
+            getSampleRate() / (static_cast<double>(inactive.fft_window_size) /
+                               windowing_overlap_times),
         .maximumBlockSize = max_samples_per_block,
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
@@ -623,9 +650,7 @@ void SpectralCompressorProcessor::update_compressors(ProcessData& data) {
     }
 
     // We need to compensate for the extra gain added by 4x overlap
-    // TODO: Once we make this configurable, figure out the proper way to
-    //       compensate for overlap
-    makeup_gain = 1.0f / std::sqrt(windowing_overlap_times);
+    makeup_gain = 1.0f / windowing_overlap_times;
     if (auto_makeup_gain) {
         if (sidechain_active) {
             // Not really sure what makes sense here
