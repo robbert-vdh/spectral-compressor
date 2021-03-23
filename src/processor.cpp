@@ -30,6 +30,13 @@ constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 constexpr char spectral_settings_group_name[] = "spectral";
 constexpr char fft_order_param_name[] = "fft_size";
 
+LambdaAsyncUpdater::LambdaAsyncUpdater(fu2::unique_function<void()> callback)
+    : callback(std::move(callback)) {}
+
+void LambdaAsyncUpdater::handleAsyncUpdate() {
+    callback();
+}
+
 LambdaParameterListener::LambdaParameterListener(
     fu2::unique_function<void(const juce::String&, float)> callback)
     : callback(std::move(callback)) {}
@@ -104,17 +111,19 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           }),
       fft_order_listener(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
+              process_data_resizer.triggerAsyncUpdate();
               // FIXME: This should be done asynchronously, but this only works
               //        while the editor is open
-              // juce::MessageManager::callAsync([&]() {
-              // TODO: The window size has to be changed after we change the
-              //       FFT window size
-              process_data.resize_and_clear(static_cast<size_t>(fft_order));
+              process_data_resizer.handleUpdateNowIfNeeded();
+          }),
+      process_data_resizer([&]() {
+          process_data.resize_and_clear(static_cast<size_t>(fft_order));
 
-              const size_t new_window_size = 1 << fft_order;
-              setLatencySamples(new_window_size);
-              // });
-          }) {
+          // TODO: The window size has to be changed after we change the FFT
+          //       window size
+          const size_t new_window_size = 1 << fft_order;
+          setLatencySamples(new_window_size);
+      }) {
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
     //      parameters in a group, right?
     for (const auto& compressor_param_name :

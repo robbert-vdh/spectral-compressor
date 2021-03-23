@@ -114,6 +114,22 @@ struct ProcessData {
 };
 
 /**
+ * Run some function on the message thread. This function will be executed
+ * synchronously and should thus run in constant time.
+ */
+class LambdaAsyncUpdater : public juce::AsyncUpdater {
+   public:
+    LambdaAsyncUpdater(fu2::unique_function<void()> callback);
+
+    void handleAsyncUpdate() override;
+
+   private:
+    fu2::unique_function<void()> callback;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LambdaAsyncUpdater)
+};
+
+/**
  * Run some function whenever a parameter changes. This function will be
  * executed synchronously and should thus run in constant time.
  */
@@ -233,10 +249,23 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     juce::AudioParameterInt& fft_order;
 
-    // Listeners
-
+    /**
+     * Will cause the compressor settings to be updated on the next processing
+     * cycle whenever a compressor parameter changes.
+     */
     LambdaParameterListener compressor_settings_listener;
+
+    /**
+     * When the FFT order parameter changes, we'll have to create a new
+     * `ProcessData` object for the new FFT window size (or rather, resize an
+     * inactive one to match the new size).
+     */
     LambdaParameterListener fft_order_listener;
+
+    /**
+     * Atomically resizes the object `ProcessData` from a background thread.
+     */
+    LambdaAsyncUpdater process_data_resizer;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };
