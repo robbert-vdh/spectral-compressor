@@ -127,6 +127,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           const size_t new_window_size = 1 << fft_order;
           setLatencySamples(new_window_size);
       }) {
+    // TODO: Move the latency computation elsewhere
+    const size_t new_window_size = 1 << fft_order;
+    setLatencySamples(new_window_size);
+
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
     //      parameters in a group, right?
     for (const auto& compressor_param_name :
@@ -198,10 +202,6 @@ void SpectralCompressorProcessor::prepareToPlay(
     int maximumExpectedSamplesPerBlock) {
     max_samples_per_block = static_cast<uint32>(maximumExpectedSamplesPerBlock);
     process_data.resize_and_clear(static_cast<size_t>(fft_order));
-
-    // TODO: Move the latency computation elsewhere
-    const size_t new_window_size = 1 << fft_order;
-    setLatencySamples(new_window_size);
 }
 
 void SpectralCompressorProcessor::releaseResources() {
@@ -263,6 +263,9 @@ void SpectralCompressorProcessor::setStateInformation(const void* data,
     // TODO: Do parameter listeners get triggered? Or alternatively, can this be
     //       called during playback (without `prepareToPlay()` being called
     //       first)?
+    // TODO: Move the latency computation elsewhere
+    const size_t new_window_size = 1 << fft_order;
+    setLatencySamples(new_window_size);
 }
 
 void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
