@@ -41,6 +41,7 @@ class AtomicResizable {
     AtomicResizable(fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
         : resize_and_clear_fn(std::move(resize_and_clear_fn)),
           active(&primary),
+          inactive(&secondary),
           primary(),
           secondary() {}
 
@@ -58,6 +59,7 @@ class AtomicResizable {
                     fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
         : resize_and_clear_fn(std::move(resize_and_clear_fn)),
           active(&primary),
+          inactive(&secondary),
           primary(initial),
           secondary(initial) {}
 
@@ -71,7 +73,9 @@ class AtomicResizable {
         // row in between audio processing calls don't cause weird behaviour
         bool expected = true;
         if (needs_swap.compare_exchange_strong(expected, false)) {
-            active = active == &primary ? &secondary : &primary;
+            // FIXME: This is not atomic, how can we swap these two pointers in
+            //        a safe way?
+            inactive = active.exchange(inactive);
         }
 
         return *active;
@@ -88,7 +92,7 @@ class AtomicResizable {
         needs_swap = false;
 
         std::lock_guard lock(resize_mutex);
-        resize_and_clear_fn(active == &primary ? secondary : primary, new_size);
+        resize_and_clear_fn(*inactive, new_size);
 
         // If for whatever reason multiple threads are calling this function at
         // the same time, then only the last one may set the swap flag to
@@ -127,6 +131,7 @@ class AtomicResizable {
 
     std::atomic_bool needs_swap = false;
     std::atomic<T*> active;
+    std::atomic<T*> inactive;
     T primary;
     T secondary;
 };
