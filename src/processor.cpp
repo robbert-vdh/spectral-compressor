@@ -27,6 +27,9 @@ constexpr char sidechain_active_param_name[] = "sidechain_active";
 constexpr char compressor_ratio_param_name[] = "compressor_ratio";
 constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
+constexpr char spectral_settings_group_name[] = "spectral";
+constexpr char fft_order_param_name[] = "fft_size";
+
 LambdaParameterListener::LambdaParameterListener(
     fu2::unique_function<void(const juce::String&, float)> callback)
     : callback(std::move(callback)) {}
@@ -67,6 +70,23 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       auto_makeup_gain_param_name,
                       "Auto Makeup Gain",
                       true)),
+              std::make_unique<juce::AudioProcessorParameterGroup>(
+                  spectral_settings_group_name,
+                  "Spectral Settings",
+                  " | ",
+                  std::make_unique<juce::AudioParameterInt>(
+                      fft_order_param_name,
+                      "Frequency Resolution",
+                      9,
+                      15,
+                      12,
+                      "",
+                      [](int value, int /*max_length*/) -> juce::String {
+                          return juce::String(1 << value);
+                      },
+                      [](const juce::String& text) -> int {
+                          return std::log2(text.getIntValue());
+                      })),
           }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
@@ -76,12 +96,25 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           *parameters.getRawParameterValue(compressor_ratio_param_name)),
       auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(auto_makeup_gain_param_name))),
+      fft_order(*dynamic_cast<juce::AudioParameterInt*>(
+          parameters.getParameter(fft_order_param_name))),
       compressor_settings_listener(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
               compressor_settings_changed = true;
-          }) {
-    setLatencySamples(fft_window_size);
+          }),
+      fft_order_listener(
+          [&](const juce::String& /*parameterID*/, float /*newValue*/) {
+              // FIXME: This should be done asynchronously, but this only works
+              //        while the editor is open
+              // juce::MessageManager::callAsync([&]() {
+              // TODO: The window size has to be changed after we change the
+              //       FFT window size
+              process_data.resize_and_clear(static_cast<size_t>(fft_order));
 
+              const size_t new_window_size = 1 << fft_order;
+              setLatencySamples(new_window_size);
+              // });
+          }) {
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
     //      parameters in a group, right?
     for (const auto& compressor_param_name :
@@ -90,6 +123,8 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
         parameters.addParameterListener(compressor_param_name,
                                         &compressor_settings_listener);
     }
+
+    parameters.addParameterListener(fft_order_param_name, &fft_order_listener);
 }
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
@@ -147,19 +182,14 @@ void SpectralCompressorProcessor::changeProgramName(
     const juce::String& /*newName*/) {}
 
 void SpectralCompressorProcessor::prepareToPlay(
-    double sampleRate,
+    double /*sampleRate*/,
     int maximumExpectedSamplesPerBlock) {
-    // TODO: The FFT settings are now fixed, we'll want to make this
-    //       configurable later
-    // TODO: Once the window size becomes configurable, the sample rate here and
-    //       in the compressors should also be updated
-    current_process_spec = juce::dsp::ProcessSpec{
-        // We only process everything once every `windowing_interval`, otherwise
-        // our attack and release times will be all messed up
-        .sampleRate = sampleRate / windowing_interval,
-        .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
-        .numChannels = static_cast<uint32>(getMainBusNumInputChannels())};
-    process_data.resize_and_clear(fft_order);
+    max_samples_per_block = static_cast<uint32>(maximumExpectedSamplesPerBlock);
+    process_data.resize_and_clear(static_cast<size_t>(fft_order));
+
+    // TODO: Move the latency computation elsewhere
+    const size_t new_window_size = 1 << fft_order;
+    setLatencySamples(new_window_size);
 }
 
 void SpectralCompressorProcessor::releaseResources() {
@@ -216,6 +246,10 @@ void SpectralCompressorProcessor::setStateInformation(const void* data,
     }
 
     compressor_settings_changed = true;
+
+    // TODO: Do parameter listeners get triggered? Or alternatively, can this be
+    //       called during playback (without `prepareToPlay()` being called
+    //       first)?
 }
 
 void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
@@ -245,13 +279,14 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
     // `windowing_interval` it can happen that we have to copy over already
     // processed audio before processing a new window
     const size_t already_processed_samples = std::min(
-        num_samples, (windowing_interval -
-                      (data.input_ring_buffers[0].pos() % windowing_interval)) %
-                         windowing_interval);
+        num_samples,
+        (data.windowing_interval -
+         (data.input_ring_buffers[0].pos() % data.windowing_interval)) %
+            data.windowing_interval);
     const size_t samples_to_be_processed =
         num_samples - already_processed_samples;
     const int windows_to_process = std::ceil(
-        static_cast<float>(samples_to_be_processed) / windowing_interval);
+        static_cast<float>(samples_to_be_processed) / data.windowing_interval);
 
     // Since we're processing audio in small chunks, we need to keep track of
     // the current sample offset in `buffers` we should use for our actual audio
@@ -415,8 +450,8 @@ void SpectralCompressorProcessor::process(juce::AudioBuffer<float>& buffer,
 
         // Copy the input audio into our ring buffer and copy the processed
         // audio into the output buffer
-        const size_t samples_to_process_this_iteration =
-            std::min(windowing_interval, num_samples - sample_buffer_offset);
+        const size_t samples_to_process_this_iteration = std::min(
+            data.windowing_interval, num_samples - sample_buffer_offset);
         for (size_t channel = 0; channel < input_channels; channel++) {
             data.input_ring_buffers[channel].read_n_from(
                 main_io.getReadPointer(channel) + sample_buffer_offset,
@@ -441,6 +476,8 @@ void SpectralCompressorProcessor::initialize_process_data(
     ProcessData& inactive,
     size_t new_fft_order) {
     inactive.fft_window_size = 1 << new_fft_order;
+    inactive.windowing_interval =
+        inactive.fft_window_size / windowing_overlap_times;
 
     if (fft_order > 0) {
         inactive.windowing_function.emplace(
@@ -488,7 +525,14 @@ void SpectralCompressorProcessor::initialize_process_data(
     juce::dsp::Compressor<float> compressor{};
     compressor.setAttack(50.0);
     compressor.setRelease(5000.0);
-    compressor.prepare(current_process_spec);
+    // TODO: Once the window size becomes configurable, the sample rate here and
+    //       in the compressors should also be updated
+    compressor.prepare(juce::dsp::ProcessSpec{
+        // We only process everything once every `windowing_interval`, otherwise
+        // our attack and release times will be all messed up
+        .sampleRate = getSampleRate() / inactive.windowing_interval,
+        .maximumBlockSize = max_samples_per_block,
+        .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 
     inactive.spectral_compressors.resize((inactive.fft_window_size / 2) - 1,
                                          compressor);

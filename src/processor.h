@@ -23,19 +23,6 @@
 #include "utils.h"
 
 /**
- * `log2(fft_window_size)`, used to create the FFT processor.
- *
- * TODO: The FFT order should be configurable as frequency resolution from
- *       order 9 (512 samples) up to order 15 (32768 samples) with the default
- *       being 12 (4096 samples)
- */
-constexpr int fft_order = 12;
-/**
- * The number of samples in our FFT window.
- */
-constexpr size_t fft_window_size = 1 << fft_order;
-
-/**
  * How many times overlapping windows we process in `fft_window_size` samples.
  *
  * TODO: We should have a time resolution parameter that controls the amount of
@@ -45,13 +32,6 @@ constexpr size_t fft_window_size = 1 << fft_order;
  *       while changing the window size?
  */
 constexpr int windowing_overlap_times = 4;
-
-/**
- * We'll have to process the input in overlapping windows and add the processed
- * results to a resulting waveform. We'll use four times overlap, so every this
- * many samples we'll do an FFT transformation.
- */
-constexpr size_t windowing_interval = fft_window_size / windowing_overlap_times;
 
 /**
  * All of the buffers, compressors and other miscellaneous object we'll need to
@@ -66,6 +46,13 @@ struct ProcessData {
      * swaps.
      */
     size_t fft_window_size;
+
+    /**
+     * We'll have to process the input in overlapping windows and add the
+     * processed results to a resulting waveform. We'll use four times overlap,
+     * so every this many samples we'll do an FFT transformation.
+     */
+    size_t windowing_interval;
 
     /**
      * We'll process the signal with overlapping windows that are added to each
@@ -209,13 +196,27 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
     /**
      * Will be set during `prepareToPlay()`, needed to initialize compressors
-     * when resizing our buffers. The sample rate is divided by the window
-     * interval to compensate for the windowed processing.
+     * when resizing our buffers.
      */
-    juce::dsp::ProcessSpec current_process_spec;
+    juce::uint32 max_samples_per_block;
 
-    // Computed parameters, set indirectly by parameters
+    juce::AudioProcessorValueTreeState parameters;
 
+    juce::AudioParameterBool& sidechain_active;
+    std::atomic<float>& compressor_ratio;
+    /**
+     * Try to automatically compensate for low thresholds. Doesn't do anything
+     * when sidechaining is active.
+     */
+    juce::AudioParameterBool& auto_makeup_gain;
+
+    /**
+     * Will be set in `CompressorSettingsListener` when any of the compressor
+     * related settings change so we can update our compressors. We'll
+     * initialize this to true so the compressors will be initialized during the
+     * first processing cycle.
+     */
+    std::atomic_bool compressor_settings_changed = true;
     /**
      * Makeup gain to be applied after compression, where 1.0 mean no gain
      * applied. Depends on the current active modes and whether the makeup gain
@@ -226,27 +227,16 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     float makeup_gain;
 
     /**
-     * Will be set in `CompressorSettingsListener` when any of the compressor
-     * related settings change so we can update our compressors. We'll
-     * initialize this to true so the compressors will be initialized during the
-     * first processing cycle.
+     * The order (where `fft_window_size = 1 << fft_order`) for our spectral
+     * operations. When this gets changed, we'll resize all of our buffers and
+     * atomically swap the current and the resized buffers.
      */
-    std::atomic_bool compressor_settings_changed = true;
-
-    // Parameters
-
-    juce::AudioProcessorValueTreeState parameters;
-    juce::AudioParameterBool& sidechain_active;
-    std::atomic<float>& compressor_ratio;
-    /**
-     * Try to automatically compensate for low thresholds. Doesn't do anything
-     * when sidechaining is active.
-     */
-    juce::AudioParameterBool& auto_makeup_gain;
+    juce::AudioParameterInt& fft_order;
 
     // Listeners
 
     LambdaParameterListener compressor_settings_listener;
+    LambdaParameterListener fft_order_listener;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };
