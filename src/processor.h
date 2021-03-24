@@ -23,17 +23,6 @@
 #include "utils.h"
 
 /**
- * How many times overlapping windows we process in `fft_window_size` samples.
- *
- * TODO: We should have a time resolution parameter that controls the amount of
- *       overlap in the windowing from 2 to 64(?) times. To the user this should
- *       be presented as samples ranging from `fft_window_size / 64` to
- *       `ffw_window_size / 2`. Maybe find some nice way to lock this in place
- *       while changing the window size?
- */
-constexpr int windowing_overlap_times = 4;
-
-/**
  * All of the buffers, compressors and other miscellaneous object we'll need to
  * do our FFT audio processing. This will be used together with
  * `AtomicResizable<T>` so it can be resized depending on the current FFT window
