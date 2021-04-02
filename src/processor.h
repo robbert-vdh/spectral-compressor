@@ -276,15 +276,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
             sample_buffer_offset += already_processed_samples;
         }
 
-        // We'll update the compressor settings just before processing if the
-        // settings have changed or if the sidechaining has been disabled.
-        bool expected = true;
-        if (windows_to_process > 0 &&
-            compressor_settings_changed.compare_exchange_strong(expected,
-                                                                false)) {
-            update_compressors(data);
-        }
-
         // Now if `windows_to_process > 0`, the current ring buffer position
         // will align with a window and we can start doing our FFT magic
         for (int window_idx = 0; window_idx < windows_to_process;

@@ -278,6 +278,13 @@ void SpectralCompressorProcessor::processBlock(
     juce::MidiBuffer& /*midiMessages*/) {
     ProcessData& data = process_data.get();
 
+    // We'll update the compressor settings just before processing if the
+    // settings have changed or if the sidechaining has been disabled
+    bool expected = true;
+    if (compressor_settings_changed.compare_exchange_strong(expected, false)) {
+        update_compressors(data);
+    }
+
     // This function will let us process the input signal in windows, using
     // overlap-add
     do_stft(buffer, data, [this](ProcessData& data, size_t input_channels) {
@@ -465,26 +472,10 @@ void SpectralCompressorProcessor::initialize_process_data(
     // Every FFT bin on both channels gets its own compressor, hooray!  The
     // `(fft_window_size / 2) - 1` is because the first bin is the DC offset and
     // shouldn't be compressed, and the bins after the Nyquist frequency are the
-    // same as the first half but in reverse order.
-    // TODO: Make the compressor settings configurable
-    // TODO: The user should be able to configure their own slope (or free
-    //       drawn)
-    // TODO: And we should be doing both upwards and downwards compression,
-    //       OTT-style
+    // same as the first half but in reverse order. The compressor settings will
+    // be set in `update_compressors()`, which is triggered on the next
+    // processing cycle by setting `compressor_settings_changed` below.
     juce::dsp::Compressor<float> compressor{};
-    compressor.setAttack(50.0);
-    compressor.setRelease(5000.0);
-    // TODO: Once the window size becomes configurable, the sample rate here and
-    //       in the compressors should also be updated
-    compressor.prepare(juce::dsp::ProcessSpec{
-        // We only process everything once every `windowing_interval`, otherwise
-        // our attack and release times will be all messed up
-        .sampleRate =
-            getSampleRate() / (static_cast<double>(inactive.fft_window_size) /
-                               windowing_overlap_times),
-        .maximumBlockSize = max_samples_per_block,
-        .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
-
     inactive.spectral_compressors.resize((inactive.fft_window_size / 2) - 1,
                                          compressor);
     inactive.spectral_compressor_sidechain_thresholds.resize(
@@ -508,13 +499,36 @@ void SpectralCompressorProcessor::initialize_process_data(
 }
 
 void SpectralCompressorProcessor::update_compressors(ProcessData& data) {
-    constexpr float base_threshold_dbfs = 0.0f;
-
+    const double effective_sample_rate =
+        getSampleRate() /
+        (static_cast<double>(data.fft_window_size) / windowing_overlap_times);
     for (size_t compressor_idx = 0;
          compressor_idx < data.spectral_compressors.size(); compressor_idx++) {
-        data.spectral_compressors[compressor_idx].setRatio(compressor_ratio);
+        auto& compressor = data.spectral_compressors[compressor_idx];
+
+        // TODO: Make the timings configurable
+        compressor.setRatio(compressor_ratio);
+        compressor.setAttack(50.0);
+        compressor.setRelease(5000.0);
+        // TODO: This prepare resets the envelope follower, which is not what we
+        //       want. In our own compressor we should have a way to just change
+        //       the sample rate.
+        // TODO: Now that the timings are compensated for changing window
+        //       intervals, we might not need this to be configurable anymore
+        //       can just leave this fixed at 4x.
+        compressor.prepare(juce::dsp::ProcessSpec{
+            // We only process everything once every `windowing_interval`,
+            // otherwise our attack and release times will be all messed up
+            .sampleRate = effective_sample_rate,
+            .maximumBlockSize = max_samples_per_block,
+            .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
     }
 
+    // TODO: The user should be able to configure their own slope (or free
+    //       drawn)
+    // TODO: And we should be doing both upwards and downwards compression,
+    //       OTT-style
+    constexpr float base_threshold_dbfs = 0.0f;
     if (!sidechain_active) {
         // The thresholds are set to match pink noise.
         // TODO: Change the calculations so that the base threshold parameter is
