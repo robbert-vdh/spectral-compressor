@@ -392,6 +392,8 @@ void SpectralCompressorProcessor::processBlock(
             // ring buffer with any (automatic) makeup gain applied
             // TODO: We might need some kind of optional limiting stage to be
             //       safe
+            // TODO: We should definitely add a way to recover transients from
+            //       the original input audio, that sounds really good
             data.output_ring_buffers[channel].add_n_from_in_place(
                 data.fft_scratch_buffer.data(), data.fft_window_size,
                 makeup_gain);
