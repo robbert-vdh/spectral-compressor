@@ -175,13 +175,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
    private:
     /**
-     * Process audio. When the plugin is bypassed we should still compensate for
-     * the altency, so if `bypassed` is true we handle audio the exact same way
-     * as usual but with all actual processing disabled.
-     */
-    void process(juce::AudioBuffer<float>& buffer, bool bypassed);
-
-    /**
      * (Re)initialize a process data object for the given FFT order. If the new
      * FFT order is 0, then the object will be cleared instead.
      */
@@ -192,6 +185,147 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * current parameters.
      */
     void update_compressors(ProcessData& data);
+
+    /**
+     * Process audio using a short term Fourier transform. This involves using
+     * the input ring buffers of `ProcessingData` to buffer audio, processing
+     * that audio in windows, adding up those windows in the output ring
+     * buffers, and then writing those outputs to `buffer`'s outputs. This
+     * function handles all of the boilerplate outside of the actual FFT
+     * operations.
+     *
+     * @param buffer The current processing cycle's buffers. This should contain
+     *   input, output, and sidechain busses with an equal number of channels
+     *   for each bus.
+     * @param data The current processing data.
+     * @param process_fn A function that performs a forward FFT on the input
+     *   ring buffer, processes the results, performs an IFFT, and then adds the
+     *   results to the output ring buffer using a windowing function.
+     *
+     * @tparam F A function that takes the current processing data, and the
+     *   number of input channels as its arguments.
+     */
+    template <std::invocable<ProcessData&, size_t> F>
+    void do_stft(juce::AudioBuffer<float>& buffer,
+                 ProcessData& data,
+                 F process_fn) {
+        juce::ScopedNoDenormals noDenormals;
+
+        juce::AudioBuffer<float> main_io = getBusBuffer(buffer, true, 0);
+        juce::AudioBuffer<float> sidechain_io = getBusBuffer(buffer, true, 1);
+
+        const size_t input_channels =
+            static_cast<size_t>(getMainBusNumInputChannels());
+        const size_t output_channels =
+            static_cast<size_t>(getMainBusNumOutputChannels());
+        const size_t num_samples = static_cast<size_t>(buffer.getNumSamples());
+
+        // Zero out all unused channels
+        for (auto channel = input_channels; channel < output_channels;
+             channel++) {
+            buffer.clear(channel, 0.0f, num_samples);
+        }
+
+        // We'll process audio in lockstep to make it easier to use processors
+        // that require lookahead and thus induce latency. Every this many
+        // samples we'll process a new window of input samples. The results will
+        // be added to the output ring buffers.
+        const size_t windowing_interval =
+            data.fft_window_size / static_cast<size_t>(windowing_overlap_times);
+
+        // We process incoming audio in windows of `windowing_interval`, and
+        // when using non-power of 2 buffer sizes of buffers that are smaller
+        // than `windowing_interval` it can happen that we have to copy over
+        // already processed audio before processing a new window
+        const size_t already_processed_samples =
+            std::min(num_samples,
+                     (windowing_interval -
+                      (data.input_ring_buffers[0].pos() % windowing_interval)) %
+                         windowing_interval);
+        const size_t samples_to_be_processed =
+            num_samples - already_processed_samples;
+        const int windows_to_process = std::ceil(
+            static_cast<float>(samples_to_be_processed) / windowing_interval);
+
+        // Since we're processing audio in small chunks, we need to keep track
+        // of the current sample offset in `buffers` we should use for our
+        // actual audio input and output
+        size_t sample_buffer_offset = 0;
+
+        // Copying from the input buffer to our input ring buffer, copying from
+        // our output ring buffer to the output buffer, and clearing the output
+        // buffer to prevent feedback is always done in sync
+        if (already_processed_samples > 0) {
+            for (size_t channel = 0; channel < input_channels; channel++) {
+                data.input_ring_buffers[channel].read_n_from(
+                    main_io.getReadPointer(channel), already_processed_samples);
+                if (data.num_windows_processed >= windowing_overlap_times) {
+                    data.output_ring_buffers[channel].copy_n_to(
+                        main_io.getWritePointer(channel),
+                        already_processed_samples, true);
+                } else {
+                    main_io.clear(channel, 0, already_processed_samples);
+                }
+                if (sidechain_active) {
+                    data.sidechain_ring_buffers[channel].read_n_from(
+                        sidechain_io.getReadPointer(channel),
+                        already_processed_samples);
+                }
+            }
+
+            sample_buffer_offset += already_processed_samples;
+        }
+
+        // We'll update the compressor settings just before processing if the
+        // settings have changed or if the sidechaining has been disabled.
+        bool expected = true;
+        if (windows_to_process > 0 &&
+            compressor_settings_changed.compare_exchange_strong(expected,
+                                                                false)) {
+            update_compressors(data);
+        }
+
+        // Now if `windows_to_process > 0`, the current ring buffer position
+        // will align with a window and we can start doing our FFT magic
+        for (int window_idx = 0; window_idx < windows_to_process;
+             window_idx++) {
+            // This is where the actual processing happens. This function should
+            // take
+            process_fn(data, input_channels);
+
+            // We don't copy over anything to the outputs until we processed a
+            // full buffer
+            data.num_windows_processed += 1;
+
+            // Copy the input audio into our ring buffer and copy the processed
+            // audio into the output buffer
+            const size_t samples_to_process_this_iteration = std::min(
+                windowing_interval, num_samples - sample_buffer_offset);
+            for (size_t channel = 0; channel < input_channels; channel++) {
+                data.input_ring_buffers[channel].read_n_from(
+                    main_io.getReadPointer(channel) + sample_buffer_offset,
+                    samples_to_process_this_iteration);
+                if (data.num_windows_processed >= windowing_overlap_times) {
+                    data.output_ring_buffers[channel].copy_n_to(
+                        main_io.getWritePointer(channel) + sample_buffer_offset,
+                        samples_to_process_this_iteration, true);
+                } else {
+                    main_io.clear(channel, sample_buffer_offset,
+                                  samples_to_process_this_iteration);
+                }
+                if (sidechain_active) {
+                    data.sidechain_ring_buffers[channel].read_n_from(
+                        sidechain_io.getReadPointer(channel) +
+                            sample_buffer_offset,
+                        samples_to_process_this_iteration);
+                }
+            }
+
+            sample_buffer_offset += samples_to_process_this_iteration;
+        }
+
+        jassert(sample_buffer_offset == num_samples);
+    }
 
     /**
      * This contains all of our scratch buffers, ring buffers, compressors, and
