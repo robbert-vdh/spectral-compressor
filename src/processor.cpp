@@ -349,12 +349,10 @@ void SpectralCompressorProcessor::processBlock(
                     data.fft_scratch_buffer.data()),
                 data.fft_window_size);
 
-            // FIXME: Zeroing out the first (DC) FFT bin gets rid of this weird
-            //        DC drifting when you look at the output in an oscilloscope
-            //        (which in turn also causes the signal to be way louder
-            //        than it actually is)
-            fft_buffer[0] = 0.0f;
-
+            // We'll compress the DC bin using the mean compression modifier
+            // from the other bins. That should keep it in line with the rest of
+            // the signal.
+            float cum_multiplier = 0.0f;
             for (size_t compressor_idx = 0;
                  compressor_idx < data.spectral_compressors.size();
                  compressor_idx++) {
@@ -374,6 +372,7 @@ void SpectralCompressorProcessor::processBlock(
                 // TODO: Add stereo linking
                 const float compression_multiplier =
                     magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
+                cum_multiplier += compressed_magnitude;
 
                 // The same operation should be applied to the mirrored bins at
                 // the end of the FFT window, except for if this is the last bin
@@ -385,6 +384,10 @@ void SpectralCompressorProcessor::processBlock(
                     fft_buffer[mirrored_bin_idx] *= compression_multiplier;
                 }
             }
+
+            // FIXME: Scaling the DC bin like this might not be the correct
+            //        solution to the DC drifting we'd otherwise get
+            fft_buffer[0] *= cum_multiplier / data.spectral_compressors.size();
 
             data.fft->performRealOnlyInverseTransform(
                 data.fft_scratch_buffer.data());
