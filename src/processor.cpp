@@ -374,15 +374,9 @@ void SpectralCompressorProcessor::processBlock(
                     magnitude != 0.0f ? compressed_magnitude / magnitude : 1.0f;
                 cum_multiplier += compressed_magnitude;
 
-                // The same operation should be applied to the mirrored bins at
-                // the end of the FFT window, except for if this is the last bin
+                // Since we're usign the real-only FFT operations we don't need
+                // to touch the second, mirrored half of the FFT bins
                 fft_buffer[bin_idx] *= compression_multiplier;
-                // TODO: Is this mirrored part necessary?
-                if (compressor_idx != data.spectral_compressors.size() - 1) {
-                    const size_t mirrored_bin_idx =
-                        data.fft_window_size - bin_idx;
-                    fft_buffer[mirrored_bin_idx] *= compression_multiplier;
-                }
             }
 
             // FIXME: Scaling the DC bin like this might not be the correct
