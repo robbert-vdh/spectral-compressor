@@ -505,6 +505,12 @@ void SpectralCompressorProcessor::initialize_process_data(
 }
 
 void SpectralCompressorProcessor::update_compressors(ProcessData& data) {
+    // TODO: We should probably update the compressors inline in
+    //       `processBlock()` (and do the CaS there). These separate loops cause
+    //       some bad cache utilization on larger FFT window sizes, and we can
+    //       just calculate t he makeup gain at the start of `processBlock()`
+    //       since it isn't very expensive.
+
     const double effective_sample_rate =
         getSampleRate() /
         (static_cast<double>(data.fft_window_size) / windowing_overlap_times);
