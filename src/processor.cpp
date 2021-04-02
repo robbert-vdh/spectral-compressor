@@ -348,6 +348,13 @@ void SpectralCompressorProcessor::processBlock(
                 reinterpret_cast<std::complex<float>*>(
                     data.fft_scratch_buffer.data()),
                 data.fft_window_size);
+
+            // FIXME: Zeroing out the first (DC) FFT bin gets rid of this weird
+            //        DC drifting when you look at the output in an oscilloscope
+            //        (which in turn also causes the signal to be way louder
+            //        than it actually is)
+            fft_buffer[0] = 0.0f;
+
             for (size_t compressor_idx = 0;
                  compressor_idx < data.spectral_compressors.size();
                  compressor_idx++) {
