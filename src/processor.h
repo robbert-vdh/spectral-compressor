@@ -140,10 +140,13 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
    private:
     /**
-     * (Re)initialize a process data object for the given FFT order. If the new
-     * FFT order is 0, then the object will be cleared instead.
+     * (Re)initialize a process data object and all compressors within it for
+     * the current FFT order on the next audio processing cycle. The inactive
+     * object we're modifying will be swapped with the active object on the next
+     * call to `process_data.get()`. This should not be called from the audio
+     * thread.
      */
-    void initialize_process_data(ProcessData& inactive, size_t new_fft_order);
+    void update_and_swap_process_data();
 
     /**
      * Calculate new compressor thresholds and other settings based on the
@@ -179,7 +182,7 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * This contains all of our scratch buffers, ring buffers, compressors, and
      * everything else that depends on the FFT window size.
      */
-    AtomicResizable<ProcessData> process_data;
+    AtomicallySwappable<ProcessData> process_data;
 
     /**
      * Will be set during `prepareToPlay()`, needed to initialize compressors
@@ -235,16 +238,15 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     LambdaParameterListener compressor_settings_listener;
 
     /**
+     * Atomically resizes the object `ProcessData` from a background thread.
+     */
+    LambdaAsyncUpdater process_data_updater;
+    /**
      * When the FFT order parameter changes, we'll have to create a new
      * `ProcessData` object for the new FFT window size (or rather, resize an
      * inactive one to match the new size).
      */
     LambdaParameterListener fft_order_listener;
-
-    /**
-     * Atomically resizes the object `ProcessData` from a background thread.
-     */
-    LambdaAsyncUpdater process_data_resizer;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };

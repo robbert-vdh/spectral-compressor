@@ -14,8 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include <atomic>
-#include <mutex>
+#pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <function2/function2.hpp>
@@ -56,53 +55,40 @@ class LambdaParameterListener
 };
 
 /**
- * A wrapper around some resizeable type `T` that contains an active `T` and an
- * inactive `T`, with a pointer pointing to the currently active object. When
- * resizing, we'll resize the inactive `T`, and then set a flag that will cause
- * the active and the inactive objects to get swapped the next time the audio
- * thread requests a reference to the currently active objects. This prevents
- * locking and memory allocations on the audio thread.
+ * A wrapper around some `T` that contains an active `T` and an inactive `T`,
+ * with a pointer pointing to the currently active object. When some plugin
+ * parameter changes that would require us to resize the object, we can resize
+ * the inactive object and then swap the two pointers on the next time we fetch
+ * the object from the audio processing loop. This prevents locking and memory
+ * allocations on the audio thread. Keep in mind that the active and the
+ * inactive objects have no relation to each other, and might thus contain
+ * completely different data.
  */
 template <typename T>
-class AtomicResizable {
+class AtomicallySwappable {
    public:
     /**
      * Default initalizes the objects.
-     *
-     * @param resize_and_clear_fn This function should resize an object of type
-     *   `T` and potentially also clear its values. A new size of 0 means that
-     *   the object has to release its resources. While not strictly necessary,
-     *   clearing may be a good idea to avoid weird pops and other artifacts.
      */
-    AtomicResizable(fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
-        : resize_and_clear_fn(std::move(resize_and_clear_fn)),
-          active(&primary),
-          inactive(&secondary),
-          primary(),
-          secondary() {}
+    AtomicallySwappable<T>()
+        : active(&primary), inactive(&secondary), primary(), secondary() {}
 
     /**
      * Initialize the objects with some default value.
      *
      * @param initial The initial value for the object. This will also be copied
      *   to the inactive slot.
-     * @param resize_and_clear_fn This function should resize an object of type
-     *   `T` and potentially also clear its values. A new size of 0 means that
-     *   the object has to release its resources. While not strictly necessary,
-     *   clearing may be a good idea to avoid weird pops and other artifacts.
      */
-    AtomicResizable(T initial,
-                    fu2::unique_function<void(T&, size_t)> resize_and_clear_fn)
-        : resize_and_clear_fn(std::move(resize_and_clear_fn)),
-          active(&primary),
+    AtomicallySwappable<T>(T initial)
+        : active(&primary),
           inactive(&secondary),
           primary(initial),
           secondary(initial) {}
 
     /**
-     * Return a reference to currently active object. This should be done at the
-     * start of the audio processing function, and the same reference should be
-     * reused for the remainder of the function.
+     * Return a reference to currently active object. This should be done once
+     * at the start of the audio processing function, and the same reference
+     * should be reused for the remainder of the function.
      */
     T& get() {
         // We'll swap the pointer on the audio thread so that two resizes in a
@@ -118,17 +104,22 @@ class AtomicResizable {
     }
 
     /**
-     * Resize and clear the object. This may block and should never be called
-     * from the audio thread.
+     * Modify the inactive object using the supplied function, and swap the
+     * active and the inactive objects on the next call to `get()`. This may
+     * block and should thus never be called from the audio thread.
+     *
+     * @tparam F A function with the signature `void(T&)`.
      */
-    void resize_and_clear(size_t new_size) {
-        // In case two resizes are performed in a row, we don't want the audio
-        // thread swapping the objects while we're performing a second resize
+    template <typename F>
+    void modify_and_swap(F modify_fn) {
+        // In case two mutations are performed in a row, we don't want the audio
+        // thread swapping the objects while we're modifying that same object
+        // from another thread
         num_resizing_threads.fetch_add(1);
         needs_swap = false;
 
         std::lock_guard lock(resize_mutex);
-        resize_and_clear_fn(*inactive, new_size);
+        modify_fn(*inactive);
 
         // If for whatever reason multiple threads are calling this function at
         // the same time, then only the last one may set the swap flag to
@@ -139,19 +130,21 @@ class AtomicResizable {
     }
 
     /**
-     * Resize both objects down to their smallest size. This should only ever be
-     * called from `AudioProcessor::releaseResources()`.
+     * Resize both objects down to their smallest size using the supplied
+     * function. This should only ever be called from
+     * `AudioProcessor::releaseResources()`.
+     *
+     * @tparam F A function with the signature `void(T&)`.
      */
-    void clear() {
+    template <typename F>
+    void clear(F clear_fn) {
         std::lock_guard lock(resize_mutex);
 
-        resize_and_clear_fn(primary, 0);
-        resize_and_clear_fn(secondary, 0);
+        clear_fn(primary);
+        clear_fn(secondary);
     }
 
    private:
-    fu2::unique_function<void(T&, size_t)> resize_and_clear_fn;
-
     /**
      * In the unlikely situation that two threads are calling resize at the same
      * time, we'll use a mutex to make sure that those two resizes aren't
