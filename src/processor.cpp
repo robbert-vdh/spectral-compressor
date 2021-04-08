@@ -558,7 +558,7 @@ void SpectralCompressorProcessor::update_compressors(
     }
 }
 
-template <std::invocable<ProcessData&, size_t> F>
+template <typename F>
 void SpectralCompressorProcessor::do_stft(juce::AudioBuffer<float>& buffer,
                                           ProcessData& process_data,
                                           F process_fn) {

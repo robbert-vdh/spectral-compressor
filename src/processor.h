@@ -173,7 +173,7 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * @tparam F A function that takes the current processing data, and the
      *   number of input channels as its arguments.
      */
-    template <std::invocable<ProcessData&, size_t> F>
+    template <typename F>
     void do_stft(juce::AudioBuffer<float>& buffer,
                  ProcessData& data,
                  F process_fn);
