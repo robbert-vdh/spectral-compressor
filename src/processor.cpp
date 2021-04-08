@@ -347,10 +347,7 @@ void SpectralCompressorProcessor::processBlock(
                         process_data.fft_scratch_buffer.data()),
                     process_data.fft_window_size);
 
-                // We'll compress the DC bin using the mean compression modifier
-                // from the other bins. That should keep it in line with the
-                // rest of the signal.
-                float cum_multiplier = 0.0f;
+                // TODO: Should we be doing something with the DC bin?
                 for (size_t compressor_idx = 0;
                      compressor_idx < process_data.spectral_compressors.size();
                      compressor_idx++) {
@@ -371,17 +368,11 @@ void SpectralCompressorProcessor::processBlock(
                     const float compression_multiplier =
                         magnitude != 0.0f ? compressed_magnitude / magnitude
                                           : 1.0f;
-                    cum_multiplier += compressed_magnitude;
 
                     // Since we're usign the real-only FFT operations we don't
                     // need to touch the second, mirrored half of the FFT bins
                     fft_buffer[bin_idx] *= compression_multiplier;
                 }
-
-                // FIXME: Scaling the DC bin like this might not be the correct
-                //        solution to the DC drifting we'd otherwise get
-                fft_buffer[0] *=
-                    cum_multiplier / process_data.spectral_compressors.size();
 
                 process_data.fft->performRealOnlyInverseTransform(
                     process_data.fft_scratch_buffer.data());
