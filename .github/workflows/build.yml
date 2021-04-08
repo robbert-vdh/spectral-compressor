@@ -48,7 +48,7 @@ jobs:
           # Statically link to libstdc++ on Ubuntu 18.04 as we're compiling with
           # a newer version of g++ than what's in the default repos
           cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
-          cmake --build build --parallel
+          cmake --build build
       # GitHub Actions doesn't let you create a tarball directly, but since we
       # have no binaries a .zip archive should be fine
       - name: Create an archive for the binaries
@@ -76,7 +76,6 @@ jobs:
       - name: Build the binaries
         run: |
           cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
-          # This doesn't work together with --parallel for some reason
           cmake --build build --config Release
       - name: Create an archive for the binaries
         run: |
@@ -102,7 +101,7 @@ jobs:
       - name: Build the binaries
         run: |
           cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
-          cmake --build build --parallel --config Release
+          cmake --build build --config Release
       - name: Create an archive for the binaries
         run: |
           mkdir "$ARCHIVE_NAME"
