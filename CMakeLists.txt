@@ -13,6 +13,15 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-fcolor-diagnostics)
 endif()
 
+# Statically link the STL on Windows for the CI builds
+if(FORCE_STATIC_LINKING AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+#
+# Dependencies
+#
+
 # Fetch JUCE and other dependencies. For non-JUCE dependencies we'll check
 # whether the package is available locally with pkgconfig before trying to
 # download and build it ourselves.
@@ -59,7 +68,9 @@ if(NOT function2_FOUND)
   CPMAddPackage("gh:Naios/function2#4.1.0")
 endif()
 
-# We only expose a single VST3 plugin
+#
+# Plugins
+#
 
 juce_add_plugin(SpectralCompressor
   PRODUCT_NAME "Spectral Compressor"
@@ -94,10 +105,10 @@ target_compile_definitions(SpectralCompressor PUBLIC
 target_compile_features(SpectralCompressor PUBLIC cxx_std_20)
 set_target_properties(SpectralCompressor PROPERTIES CXX_EXTENSIONS OFF)
 
-if(FORCE_STATIC_LINKING)
-  # TODO: Do something similar for macOS and Linux, since we're using some C++20
-  #       features
-  set_target_properties(SpectralCompressor PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# Statically link the STL on Linux for the CI builds
+# TODO: Should we also do something similar on macOS?
+if(FORCE_STATIC_LINKING AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_link_libraries(Diopser PRIVATE -static-libstdc++)
 endif()
 
 # TODO: Fix static linking. With JUCE's default settings we dynamically link to
