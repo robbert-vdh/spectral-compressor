@@ -111,7 +111,7 @@ set_target_properties(SpectralCompressor PROPERTIES CXX_EXTENSIONS OFF)
 # Statically link the STL on Linux for the CI builds
 # TODO: Should we also do something similar on macOS?
 if(FORCE_STATIC_LINKING AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_link_libraries(Diopser PRIVATE -static-libstdc++)
+  target_link_libraries(SpectralCompressor PRIVATE -static-libstdc++)
 endif()
 
 # TODO: Fix static linking. With JUCE's default settings we dynamically link to
