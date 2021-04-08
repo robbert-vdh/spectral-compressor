@@ -79,7 +79,8 @@ juce_add_plugin(SpectralCompressor
 
 target_sources(SpectralCompressor PRIVATE
   src/editor.cpp
-  src/processor.cpp)
+  src/processor.cpp
+  src/utils.cpp)
 
 target_compile_definitions(SpectralCompressor PUBLIC
   JUCE_WEB_BROWSER=0

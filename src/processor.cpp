@@ -31,22 +31,6 @@ constexpr char spectral_settings_group_name[] = "spectral";
 constexpr char fft_order_param_name[] = "fft_size";
 constexpr char windowing_overlap_times_param_name[] = "windowing_times";
 
-LambdaAsyncUpdater::LambdaAsyncUpdater(fu2::unique_function<void()> callback)
-    : callback(std::move(callback)) {}
-
-void LambdaAsyncUpdater::handleAsyncUpdate() {
-    callback();
-}
-
-LambdaParameterListener::LambdaParameterListener(
-    fu2::unique_function<void(const juce::String&, float)> callback)
-    : callback(std::move(callback)) {}
-
-void LambdaParameterListener::parameterChanged(const juce::String& parameterID,
-                                               float newValue) {
-    callback(parameterID, newValue);
-}
-
 SpectralCompressorProcessor::SpectralCompressorProcessor()
     : AudioProcessor(
           BusesProperties()
