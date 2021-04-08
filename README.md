@@ -1,6 +1,17 @@
 # Spectral Compressor
 
+[![Automated builds](https://github.com/robbert-vdh/spectral-compressor/workflows/Automated%20builds/badge.svg?branch=master&event=push)](https://github.com/robbert-vdh/spectral-compressor/actions?query=workflow%3A%22Automated+builds%22+branch%3Amaster)
+
 Just some experimentation with spectral operations.
+
+## Download
+
+You can download the latest development binaries for Linux, Windows and macOS
+from the [automated
+builds](https://github.com/robbert-vdh/spectral-compressor/actions?query=workflow%3A%22Automated+builds%22+branch%3Amaster)
+page. GitHub requires you to be signed in to be able to download these files. I
+sadly cannot provide any support for the Windows and macOS versions at the
+moment, but the plugins should work!
 
 ## Building
 
