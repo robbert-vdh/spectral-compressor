@@ -1,0 +1,114 @@
+name: Automated builds
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      # Run when pushing version tags, since otherwise it's impossible to
+      # restart a successful build after pushing a tag
+      - '*.*.*'
+  pull_request:
+    branches:
+      - master
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-bionic:
+    name: Build on Ubuntu 18.04
+    runs-on: ubuntu-18.04
+    outputs:
+      artifact-name: ${{ env.ARCHIVE_NAME }}
+    # GitHub actions does not allow you to share steps between jobs and their
+    # yaml parser does not support anchors, so we'll have to duplicate all of
+    # these steps
+    # https://github.community/t5/GitHub-Actions/reusing-sharing-inheriting-steps-between-jobs-declarations/td-p/37849
+    steps:
+      - uses: actions/checkout@v2
+      # Needed for git-describe to do anything useful
+      - name: Fetch all git history
+        run: git fetch --force --prune --tags --unshallow
+      - name: Determine build archive name
+        run: |
+          echo "ARCHIVE_NAME=spectral-compressor-$(git describe --always)-ubuntu-18.04" >> "$GITHUB_ENV"
+      # We should make a Docker container, but this works for now
+      - name: Install dependencies for JUCE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcursor-dev libxinerama-dev libxrandr-dev \
+                                  libasound2-dev
+      - name: Build the binaries
+        run: |
+          export CC=/usr/bin/gcc-10
+          export CXX=/usr/bin/g++-10
+
+          # Statically link to libstdc++ on Ubuntu 18.04 as we're compiling with
+          # a newer version of g++ than what's in the default repos
+          cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
+          cmake --build build --parallel
+      # GitHub Actions doesn't let you create a tarball directly, but since we
+      # have no binaries a .zip archive should be fine
+      - name: Create an archive for the binaries
+        run: |
+          mkdir "$ARCHIVE_NAME"
+          # TODO: Add some point, also add a readme and a changelog to these archives
+          cp -r build/SpectralCompressor_artefacts/Release/VST3/SpectralCompressor.vst3 "$ARCHIVE_NAME"
+      - uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
+
+  build-windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    outputs:
+      artifact-name: ${{ env.ARCHIVE_NAME }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Fetch all git history
+        run: git fetch --force --prune --tags --unshallow
+      - name: Determine build archive name
+        run: |
+          echo "ARCHIVE_NAME=spectral-compressor-$(git describe --always)-windows" >> "$GITHUB_ENV"
+      - name: Build the binaries
+        run: |
+          cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
+          # This doesn't work together with --parallel for some reason
+          cmake --build build --config Release
+      - name: Create an archive for the binaries
+        run: |
+          mkdir "$ARCHIVE_NAME"
+          cp -r build/SpectralCompressor_artefacts/Release/VST3/SpectralCompressor.vst3 "$ARCHIVE_NAME"
+      - uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
+
+  build-macos:
+    name: Build on macOS
+    runs-on: macos-10.15
+    outputs:
+      artifact-name: ${{ env.ARCHIVE_NAME }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Fetch all git history
+        run: git fetch --force --prune --tags --unshallow
+      - name: Determine build archive name
+        run: |
+          echo "ARCHIVE_NAME=spectral-compressor-$(git describe --always)-macos" >> "$GITHUB_ENV"
+      - name: Build the binaries
+        run: |
+          cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
+          cmake --build build --parallel --config Release
+      - name: Create an archive for the binaries
+        run: |
+          mkdir "$ARCHIVE_NAME"
+          cp -r build/SpectralCompressor_artefacts/Release/VST3/SpectralCompressor.vst3 "$ARCHIVE_NAME"
+          cp -r build/SpectralCompressor_artefacts/Release/AU/SpectralCompressor.component "$ARCHIVE_NAME"
+      - uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
