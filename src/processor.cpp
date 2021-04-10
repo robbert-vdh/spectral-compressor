@@ -446,14 +446,14 @@ void SpectralCompressorProcessor::update_and_swap_process_data() {
                                                2);
 
         // Every FFT bin on both channels gets its own compressor, hooray! The
-        // `(fft_window_size / 2) - 1` is because the first bin is the DC offset
-        // and shouldn't be compressed, and the bins after the Nyquist frequency
-        // are the same as the first half but in reverse order. The compressor
+        // `fft_window_size / 2` is because the first bin is the DC offset and
+        // shouldn't be compressed, and the bins after the Nyquist frequency are
+        // the same as the first half but in reverse order. The compressor
         // settings will be set in `update_compressors()`, which is triggered on
         // the next processing cycle by setting `compressor_settings_changed`
         // below.
-        process_data.spectral_compressors.resize(
-            (process_data.fft_window_size / 2) - 1);
+        process_data.spectral_compressors.resize(process_data.fft_window_size /
+                                                 2);
         process_data.spectral_compressor_sidechain_thresholds.resize(
             process_data.spectral_compressors.size());
 
