@@ -350,7 +350,8 @@ void SpectralCompressorProcessor::processBlock(
                         process_data.fft_scratch_buffer.data()),
                     process_data.fft_window_size);
 
-                // TODO: Should we be doing something with the DC bin?
+                // TODO: It might be nice to add a DC filter, which would be
+                //       very cheap since we're already doing FFT anyways
                 for (size_t compressor_idx = 0;
                      compressor_idx < process_data.spectral_compressors.size();
                      compressor_idx++) {
