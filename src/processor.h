@@ -216,7 +216,7 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * applied. Depends on the current active modes and whether the makeup gain
      * parameters.
      *
-     * The computed value also takes the 4x overlap into account.
+     * The computed value also takes the window overlap into account.
      */
     float makeup_gain;
 
@@ -227,13 +227,14 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     juce::AudioParameterInt& fft_order;
     /**
-     * The amount of overlap in the windowing. We end up processing the signal
-     * in `fft_window_size` windows every `fft_window_size /
-     * windowing_overlap_times` samples. When this setting gets changed, we'll
+     * The order of the overlap for the windowing (where
+     * `windowing_overlap_times = 1 1 << windowing_overlap_order`). We end up
+     * processing the signal in `fft_window_size` windows every `fft_window_size
+     * / windowing_overlap_times` samples. When this setting gets changed, we'll
      * also have to update our compressors since the effective sample rate also
      * changes.
      */
-    juce::AudioParameterInt& windowing_overlap_times;
+    juce::AudioParameterInt& windowing_overlap_order;
 
     /**
      * Will cause the compressor settings to be updated on the next processing
