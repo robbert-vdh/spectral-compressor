@@ -65,7 +65,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       " ms",
                       juce::AudioProcessorParameter::genericParameter,
                       [&](float value, int /*max_length*/) -> juce::String {
-                          return juce::String(value) + " ms";
+                          return juce::String(value, 0);
                       }),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_release_ms_param_name,
@@ -75,7 +75,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       " ms",
                       juce::AudioProcessorParameter::genericParameter,
                       [&](float value, int /*max_length*/) -> juce::String {
-                          return juce::String(value) + " ms";
+                          return juce::String(value, 0);
                       }),
                   std::make_unique<juce::AudioParameterBool>(
                       auto_makeup_gain_param_name,
