@@ -54,7 +54,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       false),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_ratio_param_name,
-                      "Compressor Ratio",
+                      "Ratio",
                       juce::NormalisableRange<float>(1.0, 300.0, 0.1, 0.25),
                       50.0),
                   std::make_unique<juce::AudioParameterFloat>(
