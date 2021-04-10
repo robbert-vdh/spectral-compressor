@@ -196,6 +196,8 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
     juce::AudioParameterBool& sidechain_active;
     std::atomic<float>& compressor_ratio;
+    std::atomic<float>& compressor_attack_ms;
+    std::atomic<float>& compressor_release_ms;
     /**
      * Try to automatically compensate for low thresholds. Doesn't do anything
      * when sidechaining is active.

@@ -25,6 +25,8 @@ using juce::uint32;
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
 constexpr char compressor_ratio_param_name[] = "compressor_ratio";
+constexpr char compressor_attack_ms_param_name[] = "compressor_attack";
+constexpr char compressor_release_ms_param_name[] = "compressor_release";
 constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
 constexpr char spectral_settings_group_name[] = "spectral";
@@ -55,6 +57,26 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       "Compressor Ratio",
                       juce::NormalisableRange<float>(1.0, 300.0, 0.1, 0.25),
                       50.0),
+                  std::make_unique<juce::AudioParameterFloat>(
+                      compressor_attack_ms_param_name,
+                      "Attack",
+                      juce::NormalisableRange<float>(0.0, 10000.0, 1.0, 0.2),
+                      50.0,
+                      " ms",
+                      juce::AudioProcessorParameter::genericParameter,
+                      [&](float value, int /*max_length*/) -> juce::String {
+                          return juce::String(value) + " ms";
+                      }),
+                  std::make_unique<juce::AudioParameterFloat>(
+                      compressor_release_ms_param_name,
+                      "Release",
+                      juce::NormalisableRange<float>(0.0, 10000.0, 1.0, 0.2),
+                      5000.0,
+                      " ms",
+                      juce::AudioProcessorParameter::genericParameter,
+                      [&](float value, int /*max_length*/) -> juce::String {
+                          return juce::String(value) + " ms";
+                      }),
                   std::make_unique<juce::AudioParameterBool>(
                       auto_makeup_gain_param_name,
                       "Auto Makeup Gain",
@@ -99,6 +121,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           parameters.getParameter(sidechain_active_param_name))),
       compressor_ratio(
           *parameters.getRawParameterValue(compressor_ratio_param_name)),
+      compressor_attack_ms(
+          *parameters.getRawParameterValue(compressor_attack_ms_param_name)),
+      compressor_release_ms(
+          *parameters.getRawParameterValue(compressor_release_ms_param_name)),
       auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(auto_makeup_gain_param_name))),
       fft_order(*dynamic_cast<juce::AudioParameterInt*>(
@@ -127,6 +153,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
     //      parameters in a group, right?
     for (const auto& compressor_param_name :
          {sidechain_active_param_name, compressor_ratio_param_name,
+          compressor_attack_ms_param_name, compressor_release_ms_param_name,
           auto_makeup_gain_param_name, windowing_overlap_times_param_name}) {
         parameters.addParameterListener(compressor_param_name,
                                         &compressor_settings_listener);
@@ -495,10 +522,9 @@ void SpectralCompressorProcessor::update_compressors(
          compressor_idx++) {
         auto& compressor = process_data.spectral_compressors[compressor_idx];
 
-        // TODO: Make the timings configurable
         compressor.setRatio(compressor_ratio);
-        compressor.setAttack(50.0);
-        compressor.setRelease(5000.0);
+        compressor.setAttack(compressor_attack_ms);
+        compressor.setRelease(compressor_release_ms);
         // TODO: This prepare resets the envelope follower, which is not what we
         //       want. In our own compressor we should have a way to just change
         //       the sample rate.
