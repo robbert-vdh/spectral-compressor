@@ -21,6 +21,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include "dsp/stft.h"
 #include "ring.h"
 #include "utils.h"
 
@@ -32,35 +33,10 @@
  */
 struct ProcessData {
     /**
-     * The size of the FFT window used in this `ProcessData` object. We store
-     * this here so that we always refer to the correct window size when doing
-     * swaps.
+     * This is where the magic happens. Performs the entire STFT and overlap-add
+     * process for us. See the `STFT` class for more information.
      */
-    size_t fft_window_size;
-
-    /**
-     * The numbers of windows already processed. We use this to reduce clicks by
-     * not copying over audio to the output during the first
-     * `windowing_overap_times` windows.
-     */
-    int num_windows_processed;
-
-    /**
-     * We'll process the signal with overlapping windows that are added to each
-     * other to form the output signal. See `input_ring_buffers` for more
-     * information on how we'll do this.
-     */
-    std::optional<juce::dsp::WindowingFunction<float>> windowing_function;
-
-    /**
-     * The FFT processor.
-     */
-    std::optional<juce::dsp::FFT> fft;
-
-    /**
-     * We need a scratch buffer that can contain `fft_window_size * 2` samples.
-     */
-    std::vector<float> fft_scratch_buffer;
+    std::optional<STFT<true>> stft;
 
     /**
      * This will contain `fft_window_size / 2` compressors. The compressors are
@@ -81,27 +57,6 @@ struct ProcessData {
      * average them and configure the compressors based on that.
      */
     std::vector<float> spectral_compressor_sidechain_thresholds;
-
-    /**
-     * A ring buffer of size `fft_window_size` for every channel. Every
-     * `windowing_interval` we'll copy the last `fft_window_size` samples to
-     * `fft_scratch_buffers` using a window function, process it, and then add
-     * the results to `output_ring_buffers`.
-     */
-    std::vector<RingBuffer<float>> input_ring_buffers;
-    /**
-     * The processed results as described in the docstring of
-     * `input_ring_buffers`. Samples from this buffer will be written to the
-     * output.
-     */
-    std::vector<RingBuffer<float>> output_ring_buffers;
-    /**
-     * These ring buffers are identical to `input_ring_buffers`, but with data
-     * from the sidechain input. When sidechaining is enabled, we set the
-     * compressor thresholds based on the magnitudes from the same FFT analysis
-     * applied to the sidechain input.
-     */
-    std::vector<RingBuffer<float>> sidechain_ring_buffers;
 };
 
 class SpectralCompressorProcessor : public juce::AudioProcessor {
@@ -155,30 +110,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * current parameters.
      */
     void update_compressors(ProcessData& data);
-
-    /**
-     * Process audio using a short term Fourier transform. This involves using
-     * the input ring buffers of `ProcessingData` to buffer audio, processing
-     * that audio in windows, adding up those windows in the output ring
-     * buffers, and then writing those outputs to `buffer`'s outputs. This
-     * function handles all of the boilerplate outside of the actual FFT
-     * operations.
-     *
-     * @param buffer The current processing cycle's buffers. This should contain
-     *   input, output, and sidechain busses with an equal number of channels
-     *   for each bus.
-     * @param data The current processing data.
-     * @param process_fn A function that performs a forward FFT on the input
-     *   ring buffer, processes the results, performs an IFFT, and then adds the
-     *   results to the output ring buffer using a windowing function.
-     *
-     * @tparam F A function that takes the current processing data, and the
-     *   number of input channels as its arguments.
-     */
-    template <typename F>
-    void do_stft(juce::AudioBuffer<float>& buffer,
-                 ProcessData& data,
-                 F process_fn);
 
     /**
      * This contains all of our scratch buffers, ring buffers, compressors, and
