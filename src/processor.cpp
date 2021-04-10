@@ -332,6 +332,9 @@ void SpectralCompressorProcessor::processBlock(
                 process_data.input_ring_buffers[channel].copy_last_n_to(
                     process_data.fft_scratch_buffer.data(),
                     process_data.fft_window_size);
+                process_data.windowing_function->multiplyWithWindowingTable(
+                    process_data.fft_scratch_buffer.data(),
+                    process_data.fft_window_size);
                 process_data.fft->performRealOnlyForwardTransform(
                     process_data.fft_scratch_buffer.data());
 
