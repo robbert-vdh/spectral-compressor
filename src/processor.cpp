@@ -77,20 +77,14 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       juce::NormalisableRange<float>(0.0, 10000.0, 1.0, 0.2),
                       50.0,
                       " ms",
-                      juce::AudioProcessorParameter::genericParameter,
-                      [&](float value, int /*max_length*/) -> juce::String {
-                          return juce::String(value, 0);
-                      }),
+                      juce::AudioProcessorParameter::genericParameter),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_release_ms_param_name,
                       "Release",
                       juce::NormalisableRange<float>(0.0, 10000.0, 1.0, 0.2),
                       5000.0,
                       " ms",
-                      juce::AudioProcessorParameter::genericParameter,
-                      [&](float value, int /*max_length*/) -> juce::String {
-                          return juce::String(value, 0);
-                      })),
+                      juce::AudioProcessorParameter::genericParameter)),
               std::make_unique<juce::AudioProcessorParameterGroup>(
                   spectral_settings_group_name,
                   "Spectral Settings",
