@@ -124,14 +124,14 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           *parameters.getRawParameterValue(compressor_release_ms_param_name)),
       auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(auto_makeup_gain_param_name))),
-      fft_order(*dynamic_cast<juce::AudioParameterInt*>(
-          parameters.getParameter(fft_order_param_name))),
-      windowing_overlap_order(*dynamic_cast<juce::AudioParameterInt*>(
-          parameters.getParameter(windowing_overlap_order_param_name))),
       compressor_settings_listener(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
               compressor_settings_changed = true;
           }),
+      fft_order(*dynamic_cast<juce::AudioParameterInt*>(
+          parameters.getParameter(fft_order_param_name))),
+      windowing_overlap_order(*dynamic_cast<juce::AudioParameterInt*>(
+          parameters.getParameter(windowing_overlap_order_param_name))),
       process_data_updater([&]() {
           update_and_swap_process_data();
 
@@ -151,7 +151,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
     for (const auto& compressor_param_name :
          {sidechain_active_param_name, compressor_ratio_param_name,
           compressor_attack_ms_param_name, compressor_release_ms_param_name,
-          auto_makeup_gain_param_name, windowing_overlap_order_param_name}) {
+          auto_makeup_gain_param_name}) {
         parameters.addParameterListener(compressor_param_name,
                                         &compressor_settings_listener);
     }
@@ -217,6 +217,10 @@ void SpectralCompressorProcessor::prepareToPlay(
     double /*sampleRate*/,
     int maximumExpectedSamplesPerBlock) {
     max_samples_per_block = static_cast<uint32>(maximumExpectedSamplesPerBlock);
+
+    // This is used to set the correct 'effective' sample rate on our
+    // compressors during the processing loop
+    last_effective_sample_rate = 0.0;
 
     // TODO: We may be doing double work here when `process_data_updater`
     //       changes the latency and the host restarts playback
@@ -305,6 +309,14 @@ void SpectralCompressorProcessor::processBlock(
         const bool update_compressors_now =
             compressor_settings_changed.compare_exchange_weak(expected, false);
 
+        // If any timing related settings change (so the FFT window size or the
+        // amount of overlap), we'll need to adjust our compressors accordingly.
+        // Since this process can cause pops and clicks, we only do it when
+        // necessary.
+        const bool update_sample_rate_now =
+            last_effective_sample_rate != effective_sample_rate;
+        last_effective_sample_rate = effective_sample_rate;
+
         // We'll compress every FTT bin individually. Bin 0 is the DC offset and
         // should be skipped, and the latter half of the FFT bins should be
         // processed in the same way as the first half but in reverse order. The
@@ -342,7 +354,9 @@ void SpectralCompressorProcessor::processBlock(
                     compressor.setThreshold((base_threshold_dbfs + 3.0f) -
                                             (3.0f * octave));
                 }
+            }
 
+            if (update_sample_rate_now) {
                 // TODO: This prepare resets the envelope follower, which is not
                 //       what we want. In our own compressor we should have a
                 //       way to just change the sample rate.
@@ -485,6 +499,7 @@ void SpectralCompressorProcessor::update_and_swap_process_data() {
         // After resizing the compressors are uninitialized and should be
         // reinitialized
         compressor_settings_changed = true;
+        last_effective_sample_rate = 0.0;
     });
 }
 

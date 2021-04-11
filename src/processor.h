@@ -115,7 +115,13 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * Will be set during `prepareToPlay()`, needed to initialize compressors
      * when resizing our buffers.
      */
-    juce::uint32 max_samples_per_block;
+    juce::uint32 max_samples_per_block = 0;
+    /**
+     * The 'effective sample rate' (sample rate divided by the windowing
+     * interval) for the last processing cycle. If this changes, then we'll need
+     * to adjust our compressors accordingly.
+     */
+    double last_effective_sample_rate = 0.0;
 
     juce::AudioProcessorValueTreeState parameters;
 
@@ -128,7 +134,11 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * when sidechaining is active.
      */
     juce::AudioParameterBool& auto_makeup_gain;
-
+    /**
+     * Will cause the compressor settings to be updated on the next processing
+     * cycle whenever a compressor parameter changes.
+     */
+    LambdaParameterListener compressor_settings_listener;
     /**
      * Will be set in `CompressorSettingsListener` when any of the compressor
      * related settings change so we can update our compressors. We'll
@@ -152,13 +162,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * changes.
      */
     juce::AudioParameterInt& windowing_overlap_order;
-
-    /**
-     * Will cause the compressor settings to be updated on the next processing
-     * cycle whenever a compressor parameter changes.
-     */
-    LambdaParameterListener compressor_settings_listener;
-
     /**
      * Atomically resizes the object `ProcessData` from a background thread.
      */
