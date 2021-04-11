@@ -18,8 +18,6 @@
 
 #include "editor.h"
 
-#include <span>
-
 using juce::uint32;
 
 constexpr char compressor_settings_group_name[] = "compressors";
