@@ -57,7 +57,7 @@ class STFT {
                                      ? RingBuffer<float>(fft_window_size)
                                      : RingBuffer<float>()),
           output_ring_buffers(num_channels,
-                              RingBuffer<float>(fft_window_size)){};
+                              RingBuffer<float>(fft_window_size)) {}
 
     /**
      * The latency introduced by this processor, in samples.
@@ -317,7 +317,7 @@ class STFT {
                     // transformed data, and the postprocess the results after
                     // the windowing function has been applied after the inverse
                     // transformation.
-                    std::span<float> sample_buffer(fft_scratch_buffer.begin(),
+                    std::span<float> sample_buffer(fft_scratch_buffer.data(),
                                                    fft_window_size);
                     std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
