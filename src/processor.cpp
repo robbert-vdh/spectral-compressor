@@ -338,7 +338,7 @@ void SpectralCompressorProcessor::processBlock(
     const float input_gain =
         juce::Decibels::decibelsToGain(static_cast<float>(input_gain_db));
     float makeup_gain =
-        (1.0f / (1 << windowing_overlap_order)) +
+        (1.0f / (1 << windowing_overlap_order)) *
         juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db));
     if (auto_makeup_gain) {
         if (sidechain_active) {
