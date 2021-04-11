@@ -106,12 +106,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     void update_and_swap_process_data();
 
     /**
-     * Calculate new compressor thresholds and other settings based on the
-     * current parameters.
-     */
-    void update_compressors(ProcessData& data);
-
-    /**
      * This contains all of our scratch buffers, ring buffers, compressors, and
      * everything else that depends on the FFT window size.
      */
@@ -142,14 +136,6 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * first processing cycle.
      */
     std::atomic_bool compressor_settings_changed = true;
-    /**
-     * Makeup gain to be applied after compression, where 1.0 mean no gain
-     * applied. Depends on the current active modes and whether the makeup gain
-     * parameters.
-     *
-     * The computed value also takes the window overlap into account.
-     */
-    float makeup_gain;
 
     /**
      * The order (where `fft_window_size = 1 << fft_order`) for our spectral

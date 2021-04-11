@@ -268,16 +268,43 @@ void SpectralCompressorProcessor::processBlock(
     juce::AudioBuffer<float> sidechain_io = getBusBuffer(buffer, true, 1);
 
     ProcessData& process_data = this->process_data.get();
+    const double effective_sample_rate =
+        getSampleRate() /
+        (static_cast<double>(process_data.stft->fft_window_size) /
+         (1 << windowing_overlap_order));
+    const float fft_frequency_increment =
+        getSampleRate() / process_data.stft->fft_window_size;
 
-    // We'll update the compressor settings just before processing if the
-    // settings have changed or if the sidechaining has been disabled
-    bool expected = true;
-    if (compressor_settings_changed.compare_exchange_strong(expected, false)) {
-        update_compressors(process_data);
+    // Makeup gain to be applied after compression, where 1.0 mean no gain
+    // applied. Automatic makeup gain takes the current compressor and windowing
+    // settings into account.
+    // TODO: We should probably also compensate for different FFT window sizes
+    float makeup_gain = 1.0f / (1 << windowing_overlap_order);
+    if (auto_makeup_gain) {
+        if (sidechain_active) {
+            // Not really sure what makes sense here
+            // TODO: Take base threshold into account
+            makeup_gain *= (compressor_ratio + 24.0f) / 25.0f;
+        } else {
+            // TODO: Make this smarter, make it take all of the compressor
+            //       parameters into account. It will probably start making
+            //       sense once we add parameters for the threshold and ratio.
+            // FIXME: This makes zero sense! But it works for our current
+            //        parameters.
+            makeup_gain *=
+                (std::log10(compressor_ratio * 100.00f) * 200.0f) - 399.0f;
+        }
     }
 
-    auto process_fn = [&process_data](std::span<std::complex<float>>& fft,
+    auto process_fn = [this, effective_sample_rate, fft_frequency_increment,
+                       &process_data](std::span<std::complex<float>>& fft,
                                       size_t channel) {
+        // We'll update the compressor settings just before processing if the
+        // settings have changed or if the sidechaining has been disabled
+        bool expected = true;
+        const bool update_compressors_now =
+            compressor_settings_changed.compare_exchange_weak(expected, false);
+
         // We'll compress every FTT bin individually. Bin 0 is the DC offset and
         // should be skipped, and the latter half of the FFT bins should be
         // processed in the same way as the first half but in reverse order. The
@@ -289,13 +316,52 @@ void SpectralCompressorProcessor::processBlock(
         for (size_t compressor_idx = 0;
              compressor_idx < process_data.spectral_compressors.size();
              compressor_idx++) {
+            auto& compressor =
+                process_data.spectral_compressors[compressor_idx];
             // We don't have a compressor for the first bin
             const size_t bin_idx = compressor_idx + 1;
 
+            if (update_compressors_now) {
+                compressor.setRatio(compressor_ratio);
+                compressor.setAttack(compressor_attack_ms);
+                compressor.setRelease(compressor_release_ms);
+                // TODO: The user should be able to configure their own slope
+                //       (or free drawn)
+                // TODO: Change the calculations so that the base threshold
+                //       parameter is centered around some frequency
+                // TODO: And we should be doing both upwards and downwards
+                //       compression, OTT-style
+                if (!sidechain_active) {
+                    constexpr float base_threshold_dbfs = 0.0f;
+                    const float frequency = fft_frequency_increment * bin_idx;
+
+                    // This starts at 1 for 0 Hz (DC)
+                    const float octave = std::log2(frequency + 2);
+
+                    // The 3 dB is to compensate for bin 0
+                    compressor.setThreshold((base_threshold_dbfs + 3.0f) -
+                                            (3.0f * octave));
+                }
+
+                // TODO: This prepare resets the envelope follower, which is not
+                //       what we want. In our own compressor we should have a
+                //       way to just change the sample rate.
+                // TODO: Now that the timings are compensated for changing
+                //       window intervals, we might not need this to be
+                //       configurable anymore can just leave this fixed at 4x.
+                compressor.prepare(juce::dsp::ProcessSpec{
+                    // We only process everything once every
+                    // `windowing_interval`, otherwise our attack and release
+                    // times will be all messed up
+                    .sampleRate = effective_sample_rate,
+                    .maximumBlockSize = max_samples_per_block,
+                    .numChannels =
+                        static_cast<uint32>(getMainBusNumInputChannels())});
+            }
+
             const float magnitude = std::abs(fft[bin_idx]);
             const float compressed_magnitude =
-                process_data.spectral_compressors[compressor_idx].processSample(
-                    channel, magnitude);
+                compressor.processSample(channel, magnitude);
 
             // We need to scale both the imaginary and real components of the
             // bins at the start and end of the spectrum by the same value
@@ -420,89 +486,6 @@ void SpectralCompressorProcessor::update_and_swap_process_data() {
         // reinitialized
         compressor_settings_changed = true;
     });
-}
-
-void SpectralCompressorProcessor::update_compressors(
-    ProcessData& process_data) {
-    // TODO: We should probably update the compressors inline in
-    //       `processBlock()` (and do the CaS there). These separate loops cause
-    //       some bad cache utilization on larger FFT window sizes, and we can
-    //       just calculate t he makeup gain at the start of `processBlock()`
-    //       since it isn't very expensive.
-
-    const double effective_sample_rate =
-        getSampleRate() /
-        (static_cast<double>(process_data.stft->fft_window_size) /
-         (1 << windowing_overlap_order));
-    for (size_t compressor_idx = 0;
-         compressor_idx < process_data.spectral_compressors.size();
-         compressor_idx++) {
-        auto& compressor = process_data.spectral_compressors[compressor_idx];
-
-        compressor.setRatio(compressor_ratio);
-        compressor.setAttack(compressor_attack_ms);
-        compressor.setRelease(compressor_release_ms);
-        // TODO: This prepare resets the envelope follower, which is not what we
-        //       want. In our own compressor we should have a way to just change
-        //       the sample rate.
-        // TODO: Now that the timings are compensated for changing window
-        //       intervals, we might not need this to be configurable anymore
-        //       can just leave this fixed at 4x.
-        compressor.prepare(juce::dsp::ProcessSpec{
-            // We only process everything once every `windowing_interval`,
-            // otherwise our attack and release times will be all messed up
-            .sampleRate = effective_sample_rate,
-            .maximumBlockSize = max_samples_per_block,
-            .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
-    }
-
-    // TODO: The user should be able to configure their own slope (or free
-    //       drawn)
-    // TODO: And we should be doing both upwards and downwards compression,
-    //       OTT-style
-    constexpr float base_threshold_dbfs = 0.0f;
-    if (!sidechain_active) {
-        // The thresholds are set to match pink noise.
-        // TODO: Change the calculations so that the base threshold parameter is
-        //       centered around some frequency
-        const float frequency_increment =
-            getSampleRate() / process_data.stft->fft_window_size;
-        for (size_t compressor_idx = 0;
-             compressor_idx < process_data.spectral_compressors.size();
-             compressor_idx++) {
-            // The first bin doesn't get a compressor
-            const size_t bin_idx = compressor_idx + 1;
-            const float frequency = frequency_increment * bin_idx;
-
-            // This starts at 1 for 0 Hz (DC)
-            const float octave = std::log2(frequency + 2);
-
-            // The 3 dB is to compensate for bin 0
-            const float threshold =
-                (base_threshold_dbfs + 3.0f) - (3.0f * octave);
-            process_data.spectral_compressors[compressor_idx].setThreshold(
-                threshold);
-        }
-    }
-
-    // We need to compensate for the extra gain added by windowing overlap
-    // TODO: We should probably also compensate for different FFT window sizes
-    makeup_gain = 1.0f / (1 << windowing_overlap_order);
-    if (auto_makeup_gain) {
-        if (sidechain_active) {
-            // Not really sure what makes sense here
-            // TODO: Take base threshold into account
-            makeup_gain *= (compressor_ratio + 24.0f) / 25.0f;
-        } else {
-            // TODO: Make this smarter, make it take all of the compressor
-            //       parameters into account. It will probably start making
-            //       sense once we add parameters for the threshold and ratio.
-            // FIXME: This makes zero sense! But it works for our current
-            //        parameters.
-            makeup_gain *=
-                (std::log10(compressor_ratio * 100.00f) * 200.0f) - 399.0f;
-        }
-    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
