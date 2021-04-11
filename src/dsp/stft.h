@@ -82,14 +82,14 @@ class STFT {
      *   The results will be written back to `buffer`'s outputs using the
      *   overlap-add method at an `fft_window_size` sample delay.
      *
-     * @tparam F A function of type `void(std::span<std::complex<float>>& fft,
-     *   size_t channel)`.
+     * @tparam FProcess A function of type `void(std::span<std::complex<float>>&
+     *   fft, size_t channel)`.
      */
-    template <typename F>
+    template <typename FProcess>
     void process(juce::AudioBuffer<float>& main_io,
                  int windowing_overlap_times,
                  float gain,
-                 F process_fn) {
+                 FProcess process_fn) {
         do_process<false, false>(
             main_io, main_io, windowing_overlap_times, gain, [](auto&, auto) {},
             []() {}, std::move(process_fn));
@@ -123,23 +123,23 @@ class STFT {
      *   The results will be written back to `buffer`'s outputs using the
      *   overlap-add method at an `fft_window_size` sample delay.
      *
-     * @tparam F A function of type `void(const std::span<std::complex<float>>&
+     * @tparam FSidechain A function of type `void(const
+     *   std::span<std::complex<float>>& fft, size_t channel)`.
+     * @tparam FPostSidechain A `void()` function.
+     * @tparam FProcess A function of type `void(std::span<std::complex<float>>&
      *   fft, size_t channel)`.
-     * @tparam G A `void()` function.
-     * @tparam H A function of type `void(std::span<std::complex<float>>& fft,
-     *   size_t channel)`.
      */
-    template <typename F,
-              typename G,
-              typename H,
+    template <typename FSidechain,
+              typename FPostSidechain,
+              typename FProcess,
               typename = std::enable_if_t<with_sidechain>>
     void process(juce::AudioBuffer<float>& main_io,
                  const juce::AudioBuffer<float>& sidechain_io,
                  int windowing_overlap_times,
                  float gain,
-                 F sidechain_fn,
-                 G post_sidechain_fn,
-                 H process_fn) {
+                 FSidechain sidechain_fn,
+                 FPostSidechain post_sidechain_fn,
+                 FProcess process_fn) {
         do_process<false, true>(main_io, sidechain_io, windowing_overlap_times,
                                 gain, std::move(sidechain_fn),
                                 std::move(post_sidechain_fn),
@@ -176,17 +176,17 @@ class STFT {
      */
     template <bool bypassed,
               bool sidechain_active,
-              typename F,
-              typename G,
-              typename H>
+              typename FSidechain,
+              typename FPostSidechain,
+              typename FProcess>
     void do_process(
         juce::AudioBuffer<float>& main_io,
         [[maybe_unused]] const juce::AudioBuffer<float>& sidechain_io,
         int windowing_overlap_times,
         float gain,
-        [[maybe_unused]] F sidechain_fn,
-        [[maybe_unused]] G post_sidechain_fn,
-        H process_fn) {
+        [[maybe_unused]] FSidechain sidechain_fn,
+        [[maybe_unused]] FPostSidechain post_sidechain_fn,
+        FProcess process_fn) {
         juce::ScopedNoDenormals noDenormals;
 
         const size_t num_channels =
