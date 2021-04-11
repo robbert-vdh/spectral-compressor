@@ -298,6 +298,8 @@ void SpectralCompressorProcessor::processBlock(
         }
     }
 
+    // TODO: Implement this for the input gain and dry/wet
+    auto preprocess_fn = [](auto&, auto) {};
     auto process_fn = [this, effective_sample_rate, fft_frequency_increment,
                        &process_data](std::span<std::complex<float>>& fft,
                                       size_t channel) {
@@ -391,6 +393,8 @@ void SpectralCompressorProcessor::processBlock(
         // TODO: We should definitely add a way to recover transients
         //       from the original input audio, that sounds really good
     };
+    // TODO: Implement this for the output gain and dry/wet
+    auto postprocess_fn = [](auto&, auto) {};
 
     // We'll process the input signal in windows, using overlap-add
     if (sidechain_active) {
@@ -435,10 +439,11 @@ void SpectralCompressorProcessor::processBlock(
                         [compressor_idx] = 0;
                 }
             },
-            process_fn);
+            preprocess_fn, process_fn, postprocess_fn);
     } else {
         process_data.stft->process(main_io, 1 << windowing_overlap_order,
-                                   makeup_gain, process_fn);
+                                   makeup_gain, preprocess_fn, process_fn,
+                                   postprocess_fn);
     }
 }
 

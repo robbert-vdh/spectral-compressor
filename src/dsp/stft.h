@@ -78,21 +78,34 @@ class STFT {
      *   overlap-add process. This should be a power of two.
      * @param gain Gain to apply to every processed window before adding it to
      *   the output. If set to 1.0, no gain will be added.
+     * @param preprocess_fn A function that receives a window of raw samples
+     *   just before the FFT processing. The windowing function will have
+     *   already applied at this point.
      * @param process_fn A function that receives and modifies an FFT buffer.
      *   The results will be written back to `buffer`'s outputs using the
      *   overlap-add method at an `fft_window_size` sample delay.
+     * @param postprocess_fn A function that receives raw samples just after the
+     *   FFT processing but before they are added to the output ring buffers.
+     *   Windowing will have already been applied at this point.
      *
+     * @tparam FPreProcess A function of type `void(std::span<float>& fft,
+     *   size_t channel)`.
      * @tparam FProcess A function of type `void(std::span<std::complex<float>>&
      *   fft, size_t channel)`.
+     * @tparam FPostProcess A function of type `void(std::span<float>& fft,
+     *   size_t channel)`.
      */
-    template <typename FProcess>
+    template <typename FPreProcess, typename FProcess, typename FPostProcess>
     void process(juce::AudioBuffer<float>& main_io,
                  int windowing_overlap_times,
                  float gain,
-                 FProcess process_fn) {
+                 FPreProcess preprocess_fn,
+                 FProcess process_fn,
+                 FPostProcess postprocess_fn) {
         do_process<false, false>(
             main_io, main_io, windowing_overlap_times, gain, [](auto&, auto) {},
-            []() {}, std::move(process_fn));
+            []() {}, std::move(preprocess_fn), std::move(process_fn),
+            std::move(postprocess_fn));
     }
 
     /**
@@ -119,19 +132,31 @@ class STFT {
      *   the sidechain signal that can be used for analysis.
      * @param post_sidechain_fn A function called after `sidechain_fn` has been
      *   called for every channel. Can be used to aggregate per-channel data.
+     * @param preprocess_fn A function that receives a window of raw samples
+     *   just before the FFT processing. The windowing function will have
+     *   already applied at this point.
      * @param process_fn A function that receives and modifies an FFT buffer.
      *   The results will be written back to `buffer`'s outputs using the
      *   overlap-add method at an `fft_window_size` sample delay.
+     * @param postprocess_fn A function that receives raw samples just after the
+     *   FFT processing but before they are added to the output ring buffers.
+     *   Windowing will have already been applied at this point.
      *
      * @tparam FSidechain A function of type `void(const
      *   std::span<std::complex<float>>& fft, size_t channel)`.
      * @tparam FPostSidechain A `void()` function.
+     * @tparam FPreProcess A function of type `void(std::span<float>& fft,
+     *   size_t channel)`.
      * @tparam FProcess A function of type `void(std::span<std::complex<float>>&
      *   fft, size_t channel)`.
+     * @tparam FPostProcess A function of type `void(std::span<float>& fft,
+     *   size_t channel)`.
      */
     template <typename FSidechain,
               typename FPostSidechain,
+              typename FPreProcess,
               typename FProcess,
+              typename FPostProcess,
               typename = std::enable_if_t<with_sidechain>>
     void process(juce::AudioBuffer<float>& main_io,
                  const juce::AudioBuffer<float>& sidechain_io,
@@ -139,11 +164,14 @@ class STFT {
                  float gain,
                  FSidechain sidechain_fn,
                  FPostSidechain post_sidechain_fn,
-                 FProcess process_fn) {
+                 FPreProcess preprocess_fn,
+                 FProcess process_fn,
+                 FPostProcess postprocess_fn) {
         do_process<false, true>(main_io, sidechain_io, windowing_overlap_times,
                                 gain, std::move(sidechain_fn),
                                 std::move(post_sidechain_fn),
-                                std::move(process_fn));
+                                std::move(preprocess_fn), std::move(process_fn),
+                                std::move(postprocess_fn));
     }
 
     /**
@@ -157,7 +185,7 @@ class STFT {
     void process_bypassed(juce::AudioBuffer<float>& main_io) {
         do_process<true, false>(
             main_io, main_io, 1, 1.0f, [](auto&, auto) {}, []() {},
-            [](auto&, auto) {});
+            [](auto&, auto) {}, [](auto&, auto) {}, [](auto&, auto) {});
     }
 
     /**
@@ -178,7 +206,9 @@ class STFT {
               bool sidechain_active,
               typename FSidechain,
               typename FPostSidechain,
-              typename FProcess>
+              typename FPreProcess,
+              typename FProcess,
+              typename FPostProcess>
     void do_process(
         juce::AudioBuffer<float>& main_io,
         [[maybe_unused]] const juce::AudioBuffer<float>& sidechain_io,
@@ -186,7 +216,9 @@ class STFT {
         float gain,
         [[maybe_unused]] FSidechain sidechain_fn,
         [[maybe_unused]] FPostSidechain post_sidechain_fn,
-        FProcess process_fn) {
+        FPreProcess preprocess_fn,
+        FProcess process_fn,
+        FPostProcess postprocess_fn) {
         juce::ScopedNoDenormals noDenormals;
 
         const size_t num_channels =
@@ -278,23 +310,35 @@ class STFT {
             // This is where the magic happens!
             for (size_t channel = 0; channel < num_channels; channel++) {
                 if constexpr (!bypassed) {
-                    input_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.data(), fft_window_size);
-                    windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_window_size);
-                    fft.performRealOnlyForwardTransform(
-                        fft_scratch_buffer.data());
-
+                    // Depending on what stage of the transformation process
+                    // we're in, our scratch buffer will contain either samples
+                    // or complex frequency bins. The caller should get a chance
+                    // to preprocess the (windowed) samples, process the
+                    // transformed data, and the postprocess the results after
+                    // the windowing function has been applied after the inverse
+                    // transformation.
+                    std::span<float> sample_buffer(fft_scratch_buffer.begin(),
+                                                   fft_window_size);
                     std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
                             fft_scratch_buffer.data()),
                         fft_window_size);
+
+                    input_ring_buffers[channel].copy_last_n_to(
+                        fft_scratch_buffer.data(), fft_window_size);
+                    windowing_function.multiplyWithWindowingTable(
+                        fft_scratch_buffer.data(), fft_window_size);
+                    preprocess_fn(sample_buffer, channel);
+
+                    fft.performRealOnlyForwardTransform(
+                        fft_scratch_buffer.data());
                     process_fn(fft_buffer, channel);
 
                     fft.performRealOnlyInverseTransform(
                         fft_scratch_buffer.data());
                     windowing_function.multiplyWithWindowingTable(
                         fft_scratch_buffer.data(), fft_window_size);
+                    postprocess_fn(sample_buffer, channel);
 
                     // After processing the windowed data, we'll add it to our
                     // output ring buffer with any (automatic) makeup gain
