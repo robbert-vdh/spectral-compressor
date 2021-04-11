@@ -125,15 +125,21 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
 
     juce::AudioProcessorValueTreeState parameters;
 
-    juce::AudioParameterBool& sidechain_active;
-    std::atomic<float>& compressor_ratio;
-    std::atomic<float>& compressor_attack_ms;
-    std::atomic<float>& compressor_release_ms;
+    /**
+     * This is essentially the makeup gain, in dB. When automatic makeup gain is
+     * enabled this is added on top of that.
+     */
+    std::atomic<float>& output_gain_db;
     /**
      * Try to automatically compensate for low thresholds. Doesn't do anything
      * when sidechaining is active.
      */
     juce::AudioParameterBool& auto_makeup_gain;
+
+    juce::AudioParameterBool& sidechain_active;
+    std::atomic<float>& compressor_ratio;
+    std::atomic<float>& compressor_attack_ms;
+    std::atomic<float>& compressor_release_ms;
     /**
      * Will cause the compressor settings to be updated on the next processing
      * cycle whenever a compressor parameter changes.

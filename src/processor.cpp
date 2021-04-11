@@ -20,12 +20,14 @@
 
 using juce::uint32;
 
+constexpr char output_gain_db_param_name[] = "output_gain";
+constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
+
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
 constexpr char compressor_ratio_param_name[] = "compressor_ratio";
 constexpr char compressor_attack_ms_param_name[] = "compressor_attack";
 constexpr char compressor_release_ms_param_name[] = "compressor_release";
-constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
 constexpr char spectral_settings_group_name[] = "spectral";
 constexpr char fft_order_param_name[] = "fft_size";
@@ -42,6 +44,20 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           nullptr,
           "parameters",
           {
+              std::make_unique<juce::AudioProcessorParameterGroup>(
+                  compressor_settings_group_name,
+                  "Master",
+                  " | ",
+                  std::make_unique<juce::AudioParameterFloat>(
+                      output_gain_db_param_name,
+                      "Output Gain",
+                      juce::NormalisableRange<float>(-50, 50, 0.1),
+                      0,
+                      " dB"),
+                  std::make_unique<juce::AudioParameterBool>(
+                      auto_makeup_gain_param_name,
+                      "Auto Makeup Gain",
+                      true)),
               std::make_unique<juce::AudioProcessorParameterGroup>(
                   compressor_settings_group_name,
                   "Compressors",
@@ -74,11 +90,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       juce::AudioProcessorParameter::genericParameter,
                       [&](float value, int /*max_length*/) -> juce::String {
                           return juce::String(value, 0);
-                      }),
-                  std::make_unique<juce::AudioParameterBool>(
-                      auto_makeup_gain_param_name,
-                      "Auto Makeup Gain",
-                      true)),
+                      })),
               std::make_unique<juce::AudioProcessorParameterGroup>(
                   spectral_settings_group_name,
                   "Spectral Settings",
@@ -112,6 +124,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
+      output_gain_db(
+          *parameters.getRawParameterValue(output_gain_db_param_name)),
+      auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters.getParameter(auto_makeup_gain_param_name))),
       sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(sidechain_active_param_name))),
       compressor_ratio(
@@ -120,8 +136,6 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           *parameters.getRawParameterValue(compressor_attack_ms_param_name)),
       compressor_release_ms(
           *parameters.getRawParameterValue(compressor_release_ms_param_name)),
-      auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
-          parameters.getParameter(auto_makeup_gain_param_name))),
       compressor_settings_listener(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
               compressor_settings_changed = true;
@@ -280,7 +294,9 @@ void SpectralCompressorProcessor::processBlock(
     // applied. Automatic makeup gain takes the current compressor and windowing
     // settings into account.
     // TODO: We should probably also compensate for different FFT window sizes
-    float makeup_gain = 1.0f / (1 << windowing_overlap_order);
+    float makeup_gain =
+        (1.0f / (1 << windowing_overlap_order)) +
+        juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db));
     if (auto_makeup_gain) {
         if (sidechain_active) {
             // Not really sure what makes sense here
