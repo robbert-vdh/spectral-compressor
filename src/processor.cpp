@@ -148,8 +148,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
     //      parameters in a group, right?
     for (const auto& compressor_param_name :
          {sidechain_active_param_name, compressor_ratio_param_name,
-          compressor_attack_ms_param_name, compressor_release_ms_param_name,
-          auto_makeup_gain_param_name}) {
+          compressor_attack_ms_param_name, compressor_release_ms_param_name}) {
         parameters.addParameterListener(compressor_param_name,
                                         &compressor_settings_listener);
     }
