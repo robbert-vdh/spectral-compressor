@@ -254,13 +254,22 @@ void SpectralCompressorProcessor::prepareToPlay(
     // compressors during the processing loop
     last_effective_sample_rate = 0.0;
 
-    // TODO: We may be doing double work here when `process_data_updater`
-    //       changes the latency and the host restarts playback
-    // After initializing the process data we make an explicit call to
-    // `process_data.get()` to swap the two filters in case we get a
-    // parameter change before the first processing cycle
-    update_and_swap_process_data();
-    process_data.get();
+    // When the latency changes because of an FFT window size change the host
+    // will restart playback and this function gets called again. In that case
+    // we don't want to do an explicit update here, because that would defeat
+    // the whole purpose of doing this atomic swap thing from a background
+    // thread.
+    //
+    // TODO: In practice this doesn't do anything, since `releaseResources()`
+    //       will also have been called at this point
+    if (!(process_data.get().stft && process_data.get().stft->fft_window_size ==
+                                         static_cast<size_t>(1 << fft_order))) {
+        // After initializing the process data we make an explicit call to
+        // `process_data.get()` to swap the two filters in case we get a
+        // parameter change before the first processing cycle
+        update_and_swap_process_data();
+        process_data.get();
+    }
 
     mixer.prepare(juce::dsp::ProcessSpec{
         .sampleRate = sampleRate,
@@ -277,7 +286,6 @@ void SpectralCompressorProcessor::releaseResources() {
         process_data.spectral_compressor_sidechain_thresholds.clear();
         process_data.spectral_compressor_sidechain_thresholds.shrink_to_fit();
     });
-    mixer.reset();
 }
 
 bool SpectralCompressorProcessor::isBusesLayoutSupported(
