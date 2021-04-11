@@ -352,6 +352,7 @@ void SpectralCompressorProcessor::processBlock(
                                       size_t /*channel*/) {
         // We apply the input gain after the windowing, just before the forward
         // FFT transformation
+        // TODO: This could be folded into the windowing function with a FMA
         juce::FloatVectorOperations::multiply(samples.data(), input_gain,
                                               samples.size());
     };
