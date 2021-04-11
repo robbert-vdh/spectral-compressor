@@ -126,6 +126,11 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     juce::AudioProcessorValueTreeState parameters;
 
     /**
+     * This is applied after windowing, just before the forward FFT
+     * transformation.
+     */
+    std::atomic<float>& input_gain_db;
+    /**
      * This is essentially the makeup gain, in dB. When automatic makeup gain is
      * enabled this is added on top of that.
      */

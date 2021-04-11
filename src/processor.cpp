@@ -20,6 +20,7 @@
 
 using juce::uint32;
 
+constexpr char input_gain_db_param_name[] = "input_gain";
 constexpr char output_gain_db_param_name[] = "output_gain";
 constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
@@ -48,6 +49,12 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                   compressor_settings_group_name,
                   "Master",
                   " | ",
+                  std::make_unique<juce::AudioParameterFloat>(
+                      input_gain_db_param_name,
+                      "Input Gain",
+                      juce::NormalisableRange<float>(-50, 50, 0.1),
+                      0,
+                      " dB"),
                   std::make_unique<juce::AudioParameterFloat>(
                       output_gain_db_param_name,
                       "Output Gain",
@@ -118,6 +125,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
+      input_gain_db(*parameters.getRawParameterValue(input_gain_db_param_name)),
       output_gain_db(
           *parameters.getRawParameterValue(output_gain_db_param_name)),
       auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
@@ -286,8 +294,11 @@ void SpectralCompressorProcessor::processBlock(
 
     // Makeup gain to be applied after compression, where 1.0 mean no gain
     // applied. Automatic makeup gain takes the current compressor and windowing
-    // settings into account.
+    // settings into account. We don't need any manual ramps or fades here
+    // because that's already included in our Hanning windows.
     // TODO: We should probably also compensate for different FFT window sizes
+    const float input_gain =
+        juce::Decibels::decibelsToGain(static_cast<float>(input_gain_db));
     float makeup_gain =
         (1.0f / (1 << windowing_overlap_order)) +
         juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db));
@@ -307,8 +318,14 @@ void SpectralCompressorProcessor::processBlock(
         }
     }
 
-    // TODO: Implement this for the input gain and dry/wet
-    auto preprocess_fn = [](auto&, auto) {};
+    // We apply the input gain after the windowing, just before the forward FFT
+    // transformation
+    auto preprocess_fn = [input_gain](std::span<float>& samples,
+                                      size_t /*channel*/) {
+        juce::FloatVectorOperations::multiply(samples.data(), input_gain,
+                                              samples.size());
+    };
+
     auto process_fn = [this, effective_sample_rate, fft_frequency_increment,
                        &process_data](std::span<std::complex<float>>& fft,
                                       size_t channel) {
@@ -402,7 +419,8 @@ void SpectralCompressorProcessor::processBlock(
         // TODO: We should definitely add a way to recover transients
         //       from the original input audio, that sounds really good
     };
-    // TODO: Implement this for the output gain and dry/wet
+
+    // TODO: Implement this for the dry/wet control
     auto postprocess_fn = [](auto&, auto) {};
 
     // We'll process the input signal in windows, using overlap-add
