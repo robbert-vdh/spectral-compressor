@@ -98,7 +98,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                   " | ",
                   std::make_unique<juce::AudioParameterInt>(
                       fft_order_param_name,
-                      "Frequency Resolution",
+                      "Resolution",
                       9,
                       15,
                       12,
@@ -111,7 +111,7 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       }),
                   std::make_unique<juce::AudioParameterInt>(
                       windowing_overlap_order_param_name,
-                      "Time Resolution",
+                      "Overlap",
                       2,
                       6,
                       2,
