@@ -112,6 +112,12 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
     AtomicallySwappable<ProcessData> process_data;
 
     /**
+     * A dry-wet mixer we'll use to be able to blend the processed and the
+     * unprocessed signals.
+     */
+    juce::dsp::DryWetMixer<float> mixer;
+
+    /**
      * Will be set during `prepareToPlay()`, needed to initialize compressors
      * when resizing our buffers.
      */
@@ -140,10 +146,28 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * when sidechaining is active.
      */
     juce::AudioParameterBool& auto_makeup_gain;
+    /**
+     * How much of the dry signal to mix in with the processed signal. This
+     * mixing is done after applying the output gain.
+     */
+    std::atomic<float>& dry_wet_ratio;
 
+    /**
+     * If true, set the compressor thresholds based on the sidechain signal.
+     */
     juce::AudioParameterBool& sidechain_active;
+    /**
+     * Compressor ratio, where everything above 1.0 means that the signal will
+     * be compressed above the threshold.
+     */
     std::atomic<float>& compressor_ratio;
+    /**
+     * Compressor release time in milliseconds.
+     */
     std::atomic<float>& compressor_attack_ms;
+    /**
+     * Compressor attack time in milliseconds.
+     */
     std::atomic<float>& compressor_release_ms;
     /**
      * Will cause the compressor settings to be updated on the next processing
