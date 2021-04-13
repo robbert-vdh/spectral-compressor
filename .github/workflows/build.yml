@@ -97,7 +97,7 @@ jobs:
         run: git fetch --force --prune --tags --unshallow
       - name: Determine build archive name
         run: |
-          echo "ARCHIVE_NAME=spectral-compressor-$(git describe --always)-macos" >> "$GITHUB_ENV"
+          echo "ARCHIVE_NAME=spectral-compressor-$(git describe --always)-macos-10.13" >> "$GITHUB_ENV"
       - name: Build the binaries
         run: |
           cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1
