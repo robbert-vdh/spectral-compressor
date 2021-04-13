@@ -57,7 +57,7 @@ else()
     "BUILD_SHARED_LIBS OFF"
     "BUILD_TESTS OFF"
     "ENABLE_FLOAT ON"
-    "ENABLE_SSE2 ON"
+    "ENABLE_AVX ON"
     "ENABLE_AVX2 ON"
   )
 
