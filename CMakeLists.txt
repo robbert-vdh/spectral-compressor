@@ -58,7 +58,7 @@ else()
     "BUILD_TESTS OFF"
     "ENABLE_FLOAT ON"
     "ENABLE_AVX ON"
-    "ENABLE_AVX2 ON"
+    "ENABLE_AVX2 OFF"
   )
 
   # CMake builds static libraries without -fPIC by default
