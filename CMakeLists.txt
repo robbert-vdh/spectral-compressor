@@ -5,6 +5,12 @@ project(spectral_compressor VERSION 0.0.1 LANGUAGES CXX)
 # TODO: Figure out a clean way to allow maintainers to disable all static
 #       linking and downloading
 option(FORCE_STATIC_LINKING "Statically link all dependencies, for distribution" OFF)
+# This option should not be necessary as FFTW should at runtime choose the
+# correct version based on the current CPU, but apparently on MacOS it doesn't
+# do that. This option is there specifically to support a single mid 2012
+# MacBook Pro that does not yet support AVX2. It also only does anything unless
+# `FORCE_STATIC_LINKING` is also enabled.
+option(WITH_FFTW_AVX2 "Enable AVX2 support. By default both AVX and AVX2 are enabled." ON)
 
 # CMake for some reason doesn't enable diagnostic colors by default
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -58,7 +64,7 @@ else()
     "BUILD_TESTS OFF"
     "ENABLE_FLOAT ON"
     "ENABLE_AVX ON"
-    "ENABLE_AVX2 ON"
+    "ENABLE_AVX2 ${WITH_FFTW_AVX2}"
   )
 
   # CMake builds static libraries without -fPIC by default
