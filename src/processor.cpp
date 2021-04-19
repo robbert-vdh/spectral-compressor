@@ -27,6 +27,7 @@ constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
+constexpr char sidechain_exponential_param_name[] = "sidechain_exp";
 constexpr char compressor_ratio_param_name[] = "compressor_ratio";
 constexpr char compressor_attack_ms_param_name[] = "compressor_attack";
 constexpr char compressor_release_ms_param_name[] = "compressor_release";
@@ -91,6 +92,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       sidechain_active_param_name,
                       "Sidechain Active",
                       false),
+                  std::make_unique<juce::AudioParameterBool>(
+                      sidechain_exponential_param_name,
+                      "Sidechain Exponential",
+                      false),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_ratio_param_name,
                       "Ratio",
@@ -151,6 +156,8 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
       dry_wet_ratio(*parameters.getRawParameterValue(dry_wet_ratio_param_name)),
       sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
           parameters.getParameter(sidechain_active_param_name))),
+      sidechain_exponential(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters.getParameter(sidechain_exponential_param_name))),
       compressor_ratio(
           *parameters.getRawParameterValue(compressor_ratio_param_name)),
       compressor_attack_ms(
@@ -487,7 +494,8 @@ void SpectralCompressorProcessor::processBlock(
                         [compressor_idx] += magnitude;
                 }
             },
-            [&process_data, num_channels = sidechain_io.getNumChannels()]() {
+            [this, &process_data,
+             num_channels = sidechain_io.getNumChannels()]() {
                 // After adding up the magnitudes for each bin in
                 // `process_data.spectral_compressor_sidechain_thresholds` we
                 // want to actually configure the compressor thresholds based on
@@ -495,12 +503,15 @@ void SpectralCompressorProcessor::processBlock(
                 for (size_t compressor_idx = 0;
                      compressor_idx < process_data.spectral_compressors.size();
                      compressor_idx++) {
+                    const float mean_magnitude =
+                        process_data.spectral_compressor_sidechain_thresholds
+                            [compressor_idx] /
+                        num_channels;
                     process_data.spectral_compressors[compressor_idx]
-                        .setThreshold(
-                            process_data
-                                .spectral_compressor_sidechain_thresholds
-                                    [compressor_idx] /
-                            num_channels);
+                        .setThreshold(sidechain_exponential
+                                          ? mean_magnitude
+                                          : juce::Decibels::gainToDecibels(
+                                                mean_magnitude));
                     process_data.spectral_compressor_sidechain_thresholds
                         [compressor_idx] = 0;
                 }

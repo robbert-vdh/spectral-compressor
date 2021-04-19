@@ -157,6 +157,14 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     juce::AudioParameterBool& sidechain_active;
     /**
+     * If set to true, the compressor will be configured based on raw
+     * magnitudes, even though it expects decibels. This is incorrect, but it
+     * does result in some interesting sound design possibilities.
+     *
+     * TODO: Decide on if we want to keep this
+     */
+    juce::AudioParameterBool& sidechain_exponential;
+    /**
      * Compressor ratio, where everything above 1.0 means that the signal will
      * be compressed above the threshold.
      */
