@@ -111,3 +111,29 @@ jobs:
         with:
           name: ${{ env.ARCHIVE_NAME }}
           path: ${{ env.ARCHIVE_NAME }}
+
+  build-macos-no-avx2:
+    name: Build on macOS without AVX2
+    runs-on: macos-10.15
+    outputs:
+      artifact-name: ${{ env.ARCHIVE_NAME }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Fetch all git history
+        run: git fetch --force --prune --tags --unshallow
+      - name: Determine build archive name
+        run: |
+          echo "ARCHIVE_NAME=spectral-compressor-$(git describe --always)-macos-10.13-avx" >> "$GITHUB_ENV"
+      - name: Build the binaries
+        run: |
+          cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DFORCE_STATIC_LINKING=1 -DWITH_FFTW_AVX2=OFF
+          cmake --build build --config Release
+      - name: Create an archive for the binaries
+        run: |
+          mkdir "$ARCHIVE_NAME"
+          cp -r build/SpectralCompressor_artefacts/Release/VST3/Spectral\ Compressor.vst3 "$ARCHIVE_NAME"
+          cp -r build/SpectralCompressor_artefacts/Release/AU/Spectral\ Compressor.component "$ARCHIVE_NAME"
+      - uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
