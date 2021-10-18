@@ -115,6 +115,12 @@ target_compile_definitions(SpectralCompressor PUBLIC
 target_compile_features(SpectralCompressor PUBLIC cxx_std_20)
 set_target_properties(SpectralCompressor PROPERTIES CXX_EXTENSIONS OFF)
 
+# GCC 7+ no longer emit instructions for 128-bit compare-and-swaps and instead
+# use libatomic for this
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_link_libraries(SpectralCompressor PRIVATE -latomic)
+endif()
+
 # Statically link the STL on Linux for the CI builds
 if(FORCE_STATIC_LINKING AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_link_libraries(SpectralCompressor PRIVATE -static-libstdc++)

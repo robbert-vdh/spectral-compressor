@@ -70,8 +70,10 @@ class AtomicallySwappable {
     /**
      * Default initalizes the objects.
      */
-    AtomicallySwappable<T>()
-        : active(&primary), inactive(&secondary), primary(), secondary() {}
+    AtomicallySwappable()
+        : pointers(Pointers{.active = &primary, .inactive = &secondary}),
+          primary(),
+          secondary() {}
 
     /**
      * Initialize the objects with some default value.
@@ -79,9 +81,8 @@ class AtomicallySwappable {
      * @param initial The initial value for the object. This will also be copied
      *   to the inactive slot.
      */
-    AtomicallySwappable<T>(T initial)
-        : active(&primary),
-          inactive(&secondary),
+    AtomicallySwappable(T initial)
+        : pointers(Pointers{.active = &primary, .inactive = &secondary}),
           primary(initial),
           secondary(initial) {}
 
@@ -95,12 +96,22 @@ class AtomicallySwappable {
         // row in between audio processing calls don't cause weird behaviour
         bool expected = true;
         if (needs_swap.compare_exchange_strong(expected, false)) {
-            // FIXME: This is not atomic, how can we swap these two pointers in
-            //        a safe way?
-            inactive = active.exchange(inactive);
+            // The CaS should be atomic, even though GCC will always return
+            // false for the `is_lock_free()`/`is_always_lock_free()` on 128-bit
+            // types
+            static_assert(sizeof(Pointers) == sizeof(T* [2]));
+
+            Pointers current_pointers, updated_pointers;
+            do {
+                current_pointers = pointers;
+                updated_pointers =
+                    Pointers{.active = current_pointers.inactive,
+                             .inactive = current_pointers.active};
+            } while (!pointers.compare_exchange_weak(current_pointers,
+                                                     updated_pointers));
         }
 
-        return *active;
+        return *pointers.load().active;
     }
 
     /**
@@ -119,7 +130,7 @@ class AtomicallySwappable {
         needs_swap = false;
 
         std::lock_guard lock(resize_mutex);
-        modify_fn(*inactive);
+        modify_fn(*pointers.load().inactive);
 
         // If for whatever reason multiple threads are calling this function at
         // the same time, then only the last one may set the swap flag to
@@ -158,9 +169,13 @@ class AtomicallySwappable {
     std::atomic_int num_resizing_threads = 0;
     std::mutex resize_mutex;
 
+    struct Pointers {
+        T* active;
+        T* inactive;
+    };
     std::atomic_bool needs_swap = false;
-    std::atomic<T*> active;
-    std::atomic<T*> inactive;
+    std::atomic<Pointers> pointers;
+
     T primary;
     T secondary;
 };
