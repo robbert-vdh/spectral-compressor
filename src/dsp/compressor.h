@@ -26,10 +26,34 @@ class MultiwayCompressor {
     MultiwayCompressor() { update(); }
 
     /**
+     * Modes for downwards, upwards, or simulteneous upwards and downwards
+     * compression. In the last mode the multiway deadzone parameter acts as an
+     * bidirectional offset to the threshold where the compressor doesn't do
+     * anything.
+     */
+    enum class Mode { downwards, upwards, multiway };
+
+    /**
+     * Set the compressor's mode.
+     */
+    void set_mode(Mode mode) { mode_ = mode; }
+
+    /**
+     * Set the compressor's deadzone when using the multiway mode. Must not be
+     * negative.
+     */
+    void set_multiway_deadzone(T deadzone_db) {
+        jassert(deadzone_db >= 0);
+
+        multiway_deadzone_db_ = deadzone_db;
+        update();
+    }
+
+    /**
      * Set the compressor's threshold in dB.
      */
-    void set_threshold(T threshold) {
-        threshold_db_ = threshold;
+    void set_threshold(T threshold_db) {
+        threshold_db_ = threshold_db;
         update();
     }
 
@@ -47,6 +71,8 @@ class MultiwayCompressor {
      * Set the compressor's attack time in milliseconds.
      */
     void set_attack(T attack) {
+        jassert(attack >= 0);
+
         attack_time_ = attack;
         update();
     }
@@ -55,6 +81,8 @@ class MultiwayCompressor {
      * Set the compressor's release time in milliseconds.
      */
     void set_release(T release) {
+        jassert(release >= 0);
+
         release_time_ = release;
         update();
     }
@@ -97,11 +125,11 @@ class MultiwayCompressor {
         }
 
         for (size_t channel = 0; channel < num_channels; ++channel) {
-            auto* inputSamples = input_block.getChannelPointer(channel);
-            auto* outputSamples = output_block.getChannelPointer(channel);
+            auto* input_samples = input_block.getChannelPointer(channel);
+            auto* output_samples = output_block.getChannelPointer(channel);
 
             for (size_t i = 0; i < num_samples; ++i)
-                outputSamples[i] = process_sample(channel, inputSamples[i]);
+                output_samples[i] = process_sample(channel, input_samples[i]);
         }
     }
 
@@ -123,6 +151,12 @@ class MultiwayCompressor {
 
    private:
     void update() {
+        // The deadzone acts in both directions, so it needs to be divided by
+        // two
+        multiway_deadzone_ =
+            std::abs(static_cast<T>(1.0) -
+                     juce::Decibels::decibelsToGain(multiway_deadzone_db_)) /
+            static_cast<T>(2.0);
         threshold_ = juce::Decibels::decibelsToGain(threshold_db_,
                                                     static_cast<T>(-200.0));
         threshold_inverse_ = static_cast<T>(1.0) / threshold_;
@@ -132,16 +166,17 @@ class MultiwayCompressor {
         envelope_filter_.setReleaseTime(release_time_);
     }
 
-    // TODO: Add a deadzone parameter and the actual upwards compression, right
-    //       now this is a boring old feedforward VCA-style compressor.
+    Mode mode_ = Mode::downwards;
     double sample_rate_ = 44100.0;
     T threshold_db_ = 0.0;
+    T multiway_deadzone_db_ = 0.0;
     T ratio_ = 1.0;
     T attack_time_ = 1.0;
     T release_time_ = 100.0;
 
     T threshold_ = 1.0;
     T threshold_inverse_ = 1.0;
+    T multiway_deadzone_ = 0.0;
     T ratio_inverse_ = 1.0;
     juce::dsp::BallisticsFilter<T> envelope_filter_;
 };
