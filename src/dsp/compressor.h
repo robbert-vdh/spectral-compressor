@@ -138,13 +138,22 @@ class MultiwayCompressor {
      */
     T process_sample(int channel, T input) {
         // Ballistics filter with peak rectifier
-        auto env = envelope_filter_.processSample(channel, input);
+        T env = envelope_filter_.processSample(channel, input);
 
-        // VCA
-        auto gain = (env < threshold_)
-                        ? static_cast<T>(1.0)
-                        : std::pow(env * threshold_inverse_,
-                                   ratio_inverse_ - static_cast<T>(1.0));
+        // The VCA can push the gain either upwards, downwards, or do nothing
+        // depending on the settings and the compressor's mode
+        // TODO: This can be optimized a bit, but it's fine for now
+        T gain = 1.0;
+        if (mode_ != Mode::upwards && env > (threshold_ + multiway_deadzone_)) {
+            // Downwards compression
+            gain = std::pow((env - multiway_deadzone_) * threshold_inverse_,
+                            ratio_inverse_ - static_cast<T>(1.0));
+        } else if (mode_ != Mode::downwards &&
+                   env < (threshold_ - multiway_deadzone_)) {
+            // Upwards compression
+            gain = std::pow((env + multiway_deadzone_) * threshold_inverse_,
+                            ratio_inverse_ - static_cast<T>(1.0));
+        }
 
         return input * gain;
     }
@@ -152,11 +161,14 @@ class MultiwayCompressor {
    private:
     void update() {
         // The deadzone acts in both directions, so it needs to be divided by
-        // two
+        // two. If multiway mode is not enabled then the deadzone is always set
+        // to 0 to simplify the calculations.
         multiway_deadzone_ =
-            std::abs(static_cast<T>(1.0) -
-                     juce::Decibels::decibelsToGain(multiway_deadzone_db_)) /
-            static_cast<T>(2.0);
+            mode_ == Mode::multiway
+                ? std::abs(static_cast<T>(1.0) - juce::Decibels::decibelsToGain(
+                                                     multiway_deadzone_db_)) /
+                      static_cast<T>(2.0)
+                : 0.0;
         threshold_ = juce::Decibels::decibelsToGain(threshold_db_,
                                                     static_cast<T>(-200.0));
         threshold_inverse_ = static_cast<T>(1.0) / threshold_;
@@ -176,6 +188,10 @@ class MultiwayCompressor {
 
     T threshold_ = 1.0;
     T threshold_inverse_ = 1.0;
+    /**
+     * Will always be set to 0 when the mode is not set to multiway regardless
+     * of the value of `multiway_deadzone_db_`.
+     */
     T multiway_deadzone_ = 0.0;
     T ratio_inverse_ = 1.0;
     juce::dsp::BallisticsFilter<T> envelope_filter_;
