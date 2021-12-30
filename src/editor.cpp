@@ -20,7 +20,7 @@
 
 SpectralCompressorEditor::SpectralCompressorEditor(
     SpectralCompressorProcessor& p)
-    : AudioProcessorEditor(&p), processor(p) {
+    : AudioProcessorEditor(&p), processor_(p) {
     setSize(400, 300);
 }
 

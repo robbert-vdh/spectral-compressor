@@ -27,7 +27,7 @@ class SpectralCompressorEditor : public juce::AudioProcessorEditor {
     void resized() override;
 
    private:
-    SpectralCompressorProcessor& processor;
+    SpectralCompressorProcessor& processor_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorEditor)
 };
