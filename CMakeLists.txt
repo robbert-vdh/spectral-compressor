@@ -33,10 +33,7 @@ endif()
 # whether the package is available locally with pkgconfig before trying to
 # download and build it ourselves.
 include(cmake/CPM.cmake)
-# This is 6.0.8 with a number of additional commits from the develop branch with
-# with Linux fixes, most notably a fix for
-# https://forum.juce.com/t/messages-are-only-being-handled-while-the-editor-is-open/45165/11
-CPMAddPackage("gh:juce-framework/JUCE#1a5fb5992a1a4e28e998708ed8dce2cc864a30d7")
+CPMAddPackage("gh:juce-framework/JUCE#6.1.4")
 
 if(NOT FORCE_STATIC_LINKING)
   find_package(PkgConfig)
