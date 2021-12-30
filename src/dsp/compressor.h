@@ -31,7 +31,9 @@ class MultiwayCompressor {
      * silence louder.
      */
     static constexpr T epsilon =
-        std::pow(static_cast<T>(10.0), -100 * static_cast<T>(0.05));
+        // GCC supports constexpr `std::pow`, MSVC and Clang don't
+        // std::pow(static_cast<T>(10.0), static_cast<T>(-100 * 0.05));
+        1e-05;
 
     /**
      * The maximum gain value, to minimize ear damage when doing upwards
