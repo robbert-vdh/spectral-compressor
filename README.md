@@ -2,7 +2,7 @@
 
 [![Automated builds](https://github.com/robbert-vdh/spectral-compressor/workflows/Automated%20builds/badge.svg?branch=master&event=push)](https://github.com/robbert-vdh/spectral-compressor/actions?query=workflow%3A%22Automated+builds%22+branch%3Amaster)
 
-Just some experimentation with spectral operations.
+Ever wondered what a 16384 band OTT would sound like? Neither did I.
 
 ## Download
 
