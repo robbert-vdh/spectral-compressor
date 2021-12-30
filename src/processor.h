@@ -21,6 +21,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include "dsp/compressor.h"
 #include "dsp/stft.h"
 #include "ring.h"
 #include "utils.h"
@@ -47,7 +48,7 @@ struct ProcessData {
      * bins in the second half should be processed the same was as the bins in
      * the first half but mirrored.
      */
-    std::vector<juce::dsp::Compressor<float>> spectral_compressors;
+    std::vector<MultiwayCompressor<float>> spectral_compressors;
 
     /**
      * When setting compressor thresholds based on a sidechain signal we should

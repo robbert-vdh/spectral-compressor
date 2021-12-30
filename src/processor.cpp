@@ -411,9 +411,9 @@ void SpectralCompressorProcessor::processBlock(
             const size_t bin_idx = compressor_idx + 1;
 
             if (update_compressors_now) {
-                compressor.setRatio(compressor_ratio_);
-                compressor.setAttack(compressor_attack_ms_);
-                compressor.setRelease(compressor_release_ms_);
+                compressor.set_ratio(compressor_ratio_);
+                compressor.set_attack(compressor_attack_ms_);
+                compressor.set_release(compressor_release_ms_);
                 // TODO: The user should be able to configure their own slope
                 //       (or free drawn)
                 // TODO: Change the calculations so that the base threshold
@@ -428,8 +428,8 @@ void SpectralCompressorProcessor::processBlock(
                     const float octave = std::log2(frequency + 2);
 
                     // The 3 dB is to compensate for bin 0
-                    compressor.setThreshold((base_threshold_dbfs + 3.0f) -
-                                            (3.0f * octave));
+                    compressor.set_threshold((base_threshold_dbfs + 3.0f) -
+                                             (3.0f * octave));
                 }
             }
 
@@ -452,7 +452,7 @@ void SpectralCompressorProcessor::processBlock(
 
             const float magnitude = std::abs(fft[bin_idx]);
             const float compressed_magnitude =
-                compressor.processSample(channel, magnitude);
+                compressor.process_sample(channel, magnitude);
 
             // We need to scale both the imaginary and real components of the
             // bins at the start and end of the spectrum by the same value
@@ -513,10 +513,10 @@ void SpectralCompressorProcessor::processBlock(
                             [compressor_idx] /
                         num_channels;
                     process_data.spectral_compressors[compressor_idx]
-                        .setThreshold(sidechain_exponential_
-                                          ? mean_magnitude
-                                          : juce::Decibels::gainToDecibels(
-                                                mean_magnitude));
+                        .set_threshold(sidechain_exponential_
+                                           ? mean_magnitude
+                                           : juce::Decibels::gainToDecibels(
+                                                 mean_magnitude));
                     process_data.spectral_compressor_sidechain_thresholds
                         [compressor_idx] = 0;
                 }
