@@ -26,6 +26,20 @@ class MultiwayCompressor {
     MultiwayCompressor() { update(); }
 
     /**
+     * The lowest sample value we will try to upwards compress, otherwise we
+     * could get infinite gain ratios and it would be waste to try to make
+     * silence louder.
+     */
+    static constexpr T epsilon =
+        std::pow(static_cast<T>(10.0), -100 * static_cast<T>(0.05));
+
+    /**
+     * The maximum gain value, to minimize ear damage when doing upwards
+     * compression.
+     */
+    static constexpr T gain_limit = 200;
+
+    /**
      * Modes for downwards, upwards, or simulteneous upwards and downwards
      * compression. In the last mode the multiway deadzone parameter acts as an
      * bidirectional offset to the threshold where the compressor doesn't do
@@ -148,11 +162,17 @@ class MultiwayCompressor {
             // Downwards compression
             gain = std::pow((env - multiway_deadzone_) * threshold_inverse_,
                             ratio_inverse_ - static_cast<T>(1.0));
-        } else if (mode_ != Mode::downwards &&
+        } else if (mode_ != Mode::downwards && env > epsilon &&
                    env < (threshold_ - multiway_deadzone_)) {
             // Upwards compression
             gain = std::pow((env + multiway_deadzone_) * threshold_inverse_,
                             ratio_inverse_ - static_cast<T>(1.0));
+
+            // When levels drop very low crazy things start happening. At that
+            // point it's best to just cap the gain ratio.
+            if (gain > gain_limit) {
+                gain = gain_limit;
+            }
         }
 
         return input * gain;
