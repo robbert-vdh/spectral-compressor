@@ -28,6 +28,9 @@ constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
 constexpr char sidechain_exponential_param_name[] = "sidechain_exp";
+constexpr char compressor_mode_param_name[] = "compressor_mode";
+constexpr char compressor_multiway_deadzone_param_name[] =
+    "compressor_multiway_deadzone";
 constexpr char compressor_ratio_param_name[] = "compressor_ratio";
 constexpr char compressor_attack_ms_param_name[] = "compressor_attack";
 constexpr char compressor_release_ms_param_name[] = "compressor_release";
@@ -96,6 +99,18 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       sidechain_exponential_param_name,
                       "Sidechain Exponential",
                       false),
+                  std::make_unique<juce::AudioParameterChoice>(
+                      compressor_mode_param_name,
+                      "Compressor Mode",
+                      // This should match `MultiwayCompressor::Mode`
+                      juce::StringArray{"Downwards", "Upwards", "Multiway"},
+                      0),
+                  std::make_unique<juce::AudioParameterFloat>(
+                      compressor_multiway_deadzone_param_name,
+                      "Multiway Deadzone",
+                      juce::NormalisableRange<float>(0, 15, 0.1),
+                      0,
+                      " dB"),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_ratio_param_name,
                       "Ratio",
@@ -160,6 +175,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           parameters_.getParameter(sidechain_active_param_name))),
       sidechain_exponential_(*dynamic_cast<juce::AudioParameterBool*>(
           parameters_.getParameter(sidechain_exponential_param_name))),
+      compressor_mode_(*dynamic_cast<juce::AudioParameterChoice*>(
+          parameters_.getParameter(compressor_mode_param_name))),
+      compressor_multiway_deadzone_(*parameters_.getRawParameterValue(
+          compressor_multiway_deadzone_param_name)),
       compressor_ratio_(
           *parameters_.getRawParameterValue(compressor_ratio_param_name)),
       compressor_attack_ms_(
@@ -191,7 +210,8 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
     //      parameters in a group, right?
     for (const auto& compressor_param_name :
-         {sidechain_active_param_name, compressor_ratio_param_name,
+         {sidechain_active_param_name, compressor_mode_param_name,
+          compressor_multiway_deadzone_param_name, compressor_ratio_param_name,
           compressor_attack_ms_param_name, compressor_release_ms_param_name}) {
         parameters_.addParameterListener(compressor_param_name,
                                          &compressor_settings_listener_);
@@ -411,6 +431,10 @@ void SpectralCompressorProcessor::processBlock(
             const size_t bin_idx = compressor_idx + 1;
 
             if (update_compressors_now) {
+                compressor.set_mode(
+                    static_cast<MultiwayCompressor<float>::Mode>(
+                        compressor_mode_.getIndex()));
+                compressor.set_multiway_deadzone(compressor_multiway_deadzone_);
                 compressor.set_ratio(compressor_ratio_);
                 compressor.set_attack(compressor_attack_ms_);
                 compressor.set_release(compressor_release_ms_);

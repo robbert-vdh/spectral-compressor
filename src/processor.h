@@ -165,6 +165,19 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * TODO: Decide on if we want to keep this
      */
     juce::AudioParameterBool& sidechain_exponential_;
+    // TODO: Add threshold offsets, right now you need to do the oldschool
+    //       compressor thing of simultaneously modifying the input and output
+    //       gains
+    /**
+     * The compressor's mode. Either downwards, upwards, or simultaneous upwards
+     * and downwards compression.
+     */
+    juce::AudioParameterChoice& compressor_mode_;
+    /**
+     * The range in dB around the threshold in decibel where the compressor
+     * should not be active when the compressor is set to multiway mode.
+     */
+    std::atomic<float>& compressor_multiway_deadzone_;
     /**
      * Compressor ratio, where everything above 1.0 means that the signal will
      * be compressed above the threshold.
