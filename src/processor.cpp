@@ -361,6 +361,9 @@ void SpectralCompressorProcessor::processBlock(
          (1 << windowing_overlap_order_));
     const float fft_frequency_increment =
         getSampleRate() / process_data.stft->fft_window_size;
+    const MultiwayCompressor<float>::Mode compressor_mode =
+        static_cast<MultiwayCompressor<float>::Mode>(
+            compressor_mode_.getIndex());
 
     // We have two different gain stages: just before the FFT transformations,
     // after the FFT transformations (the makeup gain). As part of the makeup
@@ -373,7 +376,10 @@ void SpectralCompressorProcessor::processBlock(
     float makeup_gain =
         (1.0f / (1 << windowing_overlap_order_)) *
         juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db_));
-    if (auto_makeup_gain_) {
+    // Obviously don't apply auto makeup gain when doing upwards compression,
+    // that will just blow up speakers
+    if (auto_makeup_gain_ &&
+        compressor_mode != MultiwayCompressor<float>::Mode::upwards) {
         if (sidechain_active_) {
             // Not really sure what makes sense here
             // TODO: Take base threshold into account
@@ -398,9 +404,9 @@ void SpectralCompressorProcessor::processBlock(
                                               samples.size());
     };
 
-    auto process_fn = [this, effective_sample_rate, fft_frequency_increment,
-                       &process_data](std::span<std::complex<float>>& fft,
-                                      size_t channel) {
+    auto process_fn = [this, compressor_mode, effective_sample_rate,
+                       fft_frequency_increment, &process_data](
+                          std::span<std::complex<float>>& fft, size_t channel) {
         // We'll update the compressor settings just before processing if the
         // settings have changed or if the sidechaining has been disabled
         bool expected = true;
@@ -432,9 +438,7 @@ void SpectralCompressorProcessor::processBlock(
             const size_t bin_idx = compressor_idx + 1;
 
             if (update_compressors_now) {
-                compressor.set_mode(
-                    static_cast<MultiwayCompressor<float>::Mode>(
-                        compressor_mode_.getIndex()));
+                compressor.set_mode(compressor_mode);
                 compressor.set_multiway_deadzone(compressor_multiway_deadzone_);
                 compressor.set_ratio(compressor_ratio_);
                 compressor.set_attack(compressor_attack_ms_);
