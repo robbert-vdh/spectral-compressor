@@ -33,7 +33,8 @@ endif()
 # whether the package is available locally with pkgconfig before trying to
 # download and build it ourselves.
 include(cmake/CPM.cmake)
-CPMAddPackage("gh:juce-framework/JUCE#6.1.4")
+# FIXME: JUCE 6.1.3 and 6.1.4 will trigger an X11 error upon loading the plugin
+CPMAddPackage("gh:juce-framework/JUCE#6.1.2")
 
 if(NOT FORCE_STATIC_LINKING)
   find_package(PkgConfig)
