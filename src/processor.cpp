@@ -378,20 +378,29 @@ void SpectralCompressorProcessor::processBlock(
         juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db_));
     // Obviously don't apply auto makeup gain when doing upwards compression,
     // that will just blow up speakers
-    if (auto_makeup_gain_ &&
-        compressor_mode != MultiwayCompressor<float>::Mode::upwards) {
-        if (sidechain_active_) {
-            // Not really sure what makes sense here
-            // TODO: Take base threshold into account
-            makeup_gain *= (compressor_ratio_ + 24.0f) / 25.0f;
-        } else {
-            // TODO: Make this smarter, make it take all of the compressor
-            //       parameters into account. It will probably start making
-            //       sense once we add parameters for the threshold and ratio.
-            // FIXME: This makes zero sense! But it works for our current
-            //        parameters.
-            makeup_gain *=
-                (std::log10(compressor_ratio_ * 100.00f) * 200.0f) - 399.0f;
+    if (auto_makeup_gain_) {
+        makeup_gain *= 1.0f / input_gain;
+
+        // FIXME: None of this makes any sense! But it works for our current
+        //        parameters. At some point, come up with a more
+        //        mathematically justified auto gaining algorithm.
+        if (compressor_mode != MultiwayCompressor<float>::Mode::upwards) {
+            if (sidechain_active_) {
+                // Not really sure what makes sense here
+                // TODO: Take base threshold into account
+                makeup_gain *= (compressor_ratio_ + 24.0f) / 25.0f;
+            } else {
+                // TODO: Make this smarter, make it take all of the compressor
+                //       parameters into account. It will probably start making
+                //       sense once we add parameters for the threshold and
+                //       ratio.
+                makeup_gain *=
+                    compressor_ratio_ > 1.0
+                        ? ((std::log10(compressor_ratio_ * 100.00f) * 200.0f) -
+                           399.0f) *
+                              (input_gain)
+                        : 1.0f;
+            }
         }
     }
 
