@@ -45,8 +45,8 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
               .withInput("Input", juce::AudioChannelSet::stereo(), true)
               .withOutput("Output", juce::AudioChannelSet::stereo(), true)
               .withInput("Sidechain", juce::AudioChannelSet::stereo(), true)),
-      mixer(1 << fft_order_maximum),
-      parameters(
+      mixer_(1 << fft_order_maximum),
+      parameters_(
           *this,
           nullptr,
           "parameters",
@@ -148,42 +148,44 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           }),
       // TODO: Is this how you're supposed to retrieve non-float parameters?
       //       Seems a bit excessive
-      input_gain_db(*parameters.getRawParameterValue(input_gain_db_param_name)),
-      output_gain_db(
-          *parameters.getRawParameterValue(output_gain_db_param_name)),
-      auto_makeup_gain(*dynamic_cast<juce::AudioParameterBool*>(
-          parameters.getParameter(auto_makeup_gain_param_name))),
-      dry_wet_ratio(*parameters.getRawParameterValue(dry_wet_ratio_param_name)),
-      sidechain_active(*dynamic_cast<juce::AudioParameterBool*>(
-          parameters.getParameter(sidechain_active_param_name))),
-      sidechain_exponential(*dynamic_cast<juce::AudioParameterBool*>(
-          parameters.getParameter(sidechain_exponential_param_name))),
-      compressor_ratio(
-          *parameters.getRawParameterValue(compressor_ratio_param_name)),
-      compressor_attack_ms(
-          *parameters.getRawParameterValue(compressor_attack_ms_param_name)),
-      compressor_release_ms(
-          *parameters.getRawParameterValue(compressor_release_ms_param_name)),
-      compressor_settings_listener(
+      input_gain_db_(
+          *parameters_.getRawParameterValue(input_gain_db_param_name)),
+      output_gain_db_(
+          *parameters_.getRawParameterValue(output_gain_db_param_name)),
+      auto_makeup_gain_(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters_.getParameter(auto_makeup_gain_param_name))),
+      dry_wet_ratio_(
+          *parameters_.getRawParameterValue(dry_wet_ratio_param_name)),
+      sidechain_active_(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters_.getParameter(sidechain_active_param_name))),
+      sidechain_exponential_(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters_.getParameter(sidechain_exponential_param_name))),
+      compressor_ratio_(
+          *parameters_.getRawParameterValue(compressor_ratio_param_name)),
+      compressor_attack_ms_(
+          *parameters_.getRawParameterValue(compressor_attack_ms_param_name)),
+      compressor_release_ms_(
+          *parameters_.getRawParameterValue(compressor_release_ms_param_name)),
+      compressor_settings_listener_(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
-              compressor_settings_changed = true;
+              compressor_settings_changed_ = true;
           }),
-      fft_order(*dynamic_cast<juce::AudioParameterInt*>(
-          parameters.getParameter(fft_order_param_name))),
-      windowing_overlap_order(*dynamic_cast<juce::AudioParameterInt*>(
-          parameters.getParameter(windowing_overlap_order_param_name))),
-      process_data_updater([&]() {
+      fft_order_(*dynamic_cast<juce::AudioParameterInt*>(
+          parameters_.getParameter(fft_order_param_name))),
+      windowing_overlap_order_(*dynamic_cast<juce::AudioParameterInt*>(
+          parameters_.getParameter(windowing_overlap_order_param_name))),
+      process_data_updater_([&]() {
           update_and_swap_process_data();
 
-          const size_t new_window_size = 1 << fft_order;
+          const size_t new_window_size = 1 << fft_order_;
           setLatencySamples(new_window_size);
       }),
-      fft_order_listener(
+      fft_order_listener_(
           [&](const juce::String& /*parameterID*/, float /*newValue*/) {
-              process_data_updater.triggerAsyncUpdate();
+              process_data_updater_.triggerAsyncUpdate();
           }) {
     // TODO: Move the latency computation elsewhere
-    const size_t new_window_size = 1 << fft_order;
+    const size_t new_window_size = 1 << fft_order_;
     setLatencySamples(new_window_size);
 
     // XXX: There doesn't seem to be a fool proof way to just iterate over all
@@ -191,11 +193,12 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
     for (const auto& compressor_param_name :
          {sidechain_active_param_name, compressor_ratio_param_name,
           compressor_attack_ms_param_name, compressor_release_ms_param_name}) {
-        parameters.addParameterListener(compressor_param_name,
-                                        &compressor_settings_listener);
+        parameters_.addParameterListener(compressor_param_name,
+                                         &compressor_settings_listener_);
     }
 
-    parameters.addParameterListener(fft_order_param_name, &fft_order_listener);
+    parameters_.addParameterListener(fft_order_param_name,
+                                     &fft_order_listener_);
 }
 
 SpectralCompressorProcessor::~SpectralCompressorProcessor() {}
@@ -255,11 +258,12 @@ void SpectralCompressorProcessor::changeProgramName(
 void SpectralCompressorProcessor::prepareToPlay(
     double sampleRate,
     int maximumExpectedSamplesPerBlock) {
-    max_samples_per_block = static_cast<uint32>(maximumExpectedSamplesPerBlock);
+    max_samples_per_block_ =
+        static_cast<uint32>(maximumExpectedSamplesPerBlock);
 
     // This is used to set the correct 'effective' sample rate on our
     // compressors during the processing loop
-    last_effective_sample_rate = 0.0;
+    last_effective_sample_rate_ = 0.0;
 
     // When the latency changes because of an FFT window size change the host
     // will restart playback and this function gets called again. In that case
@@ -269,23 +273,24 @@ void SpectralCompressorProcessor::prepareToPlay(
     //
     // TODO: In practice this doesn't do anything, since `releaseResources()`
     //       will also have been called at this point
-    if (!(process_data.get().stft && process_data.get().stft->fft_window_size ==
-                                         static_cast<size_t>(1 << fft_order))) {
+    if (!(process_data_.get().stft &&
+          process_data_.get().stft->fft_window_size ==
+              static_cast<size_t>(1 << fft_order_))) {
         // After initializing the process data we make an explicit call to
         // `process_data.get()` to swap the two filters in case we get a
         // parameter change before the first processing cycle
         update_and_swap_process_data();
-        process_data.get();
+        process_data_.get();
     }
 
-    mixer.prepare(juce::dsp::ProcessSpec{
+    mixer_.prepare(juce::dsp::ProcessSpec{
         .sampleRate = sampleRate,
         .maximumBlockSize = static_cast<uint32>(maximumExpectedSamplesPerBlock),
         .numChannels = static_cast<uint32>(getMainBusNumInputChannels())});
 }
 
 void SpectralCompressorProcessor::releaseResources() {
-    process_data.clear([](ProcessData& process_data) {
+    process_data_.clear([](ProcessData& process_data) {
         process_data.stft.reset();
 
         process_data.spectral_compressors.clear();
@@ -314,7 +319,7 @@ void SpectralCompressorProcessor::processBlockBypassed(
 
     // We need to maintain the same latency when bypassed, so we'll reuse most
     // of the processing logic
-    ProcessData& process_data = this->process_data.get();
+    ProcessData& process_data = process_data_.get();
     process_data.stft->process_bypassed(main_io);
 }
 
@@ -325,14 +330,14 @@ void SpectralCompressorProcessor::processBlock(
     juce::AudioBuffer<float> sidechain_io = getBusBuffer(buffer, true, 1);
 
     juce::dsp::AudioBlock<float> main_block(main_io);
-    mixer.setWetMixProportion(dry_wet_ratio);
-    mixer.pushDrySamples(main_block);
+    mixer_.setWetMixProportion(dry_wet_ratio_);
+    mixer_.pushDrySamples(main_block);
 
-    ProcessData& process_data = this->process_data.get();
+    ProcessData& process_data = process_data_.get();
     const double effective_sample_rate =
         getSampleRate() /
         (static_cast<double>(process_data.stft->fft_window_size) /
-         (1 << windowing_overlap_order));
+         (1 << windowing_overlap_order_));
     const float fft_frequency_increment =
         getSampleRate() / process_data.stft->fft_window_size;
 
@@ -343,15 +348,15 @@ void SpectralCompressorProcessor::processBlock(
     // our Hanning windows.
     // TODO: We should probably also compensate for different FFT window sizes
     const float input_gain =
-        juce::Decibels::decibelsToGain(static_cast<float>(input_gain_db));
+        juce::Decibels::decibelsToGain(static_cast<float>(input_gain_db_));
     float makeup_gain =
-        (1.0f / (1 << windowing_overlap_order)) *
-        juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db));
-    if (auto_makeup_gain) {
-        if (sidechain_active) {
+        (1.0f / (1 << windowing_overlap_order_)) *
+        juce::Decibels::decibelsToGain(static_cast<float>(output_gain_db_));
+    if (auto_makeup_gain_) {
+        if (sidechain_active_) {
             // Not really sure what makes sense here
             // TODO: Take base threshold into account
-            makeup_gain *= (compressor_ratio + 24.0f) / 25.0f;
+            makeup_gain *= (compressor_ratio_ + 24.0f) / 25.0f;
         } else {
             // TODO: Make this smarter, make it take all of the compressor
             //       parameters into account. It will probably start making
@@ -359,7 +364,7 @@ void SpectralCompressorProcessor::processBlock(
             // FIXME: This makes zero sense! But it works for our current
             //        parameters.
             makeup_gain *=
-                (std::log10(compressor_ratio * 100.00f) * 200.0f) - 399.0f;
+                (std::log10(compressor_ratio_ * 100.00f) * 200.0f) - 399.0f;
         }
     }
 
@@ -379,15 +384,15 @@ void SpectralCompressorProcessor::processBlock(
         // settings have changed or if the sidechaining has been disabled
         bool expected = true;
         const bool update_compressors_now =
-            compressor_settings_changed.compare_exchange_weak(expected, false);
+            compressor_settings_changed_.compare_exchange_weak(expected, false);
 
         // If any timing related settings change (so the FFT window size or the
         // amount of overlap), we'll need to adjust our compressors accordingly.
         // Since this process can cause pops and clicks, we only do it when
         // necessary.
         const bool update_sample_rate_now =
-            last_effective_sample_rate != effective_sample_rate;
-        last_effective_sample_rate = effective_sample_rate;
+            last_effective_sample_rate_ != effective_sample_rate;
+        last_effective_sample_rate_ = effective_sample_rate;
 
         // We'll compress every FTT bin individually. Bin 0 is the DC offset and
         // should be skipped, and the latter half of the FFT bins should be
@@ -406,16 +411,16 @@ void SpectralCompressorProcessor::processBlock(
             const size_t bin_idx = compressor_idx + 1;
 
             if (update_compressors_now) {
-                compressor.setRatio(compressor_ratio);
-                compressor.setAttack(compressor_attack_ms);
-                compressor.setRelease(compressor_release_ms);
+                compressor.setRatio(compressor_ratio_);
+                compressor.setAttack(compressor_attack_ms_);
+                compressor.setRelease(compressor_release_ms_);
                 // TODO: The user should be able to configure their own slope
                 //       (or free drawn)
                 // TODO: Change the calculations so that the base threshold
                 //       parameter is centered around some frequency
                 // TODO: And we should be doing both upwards and downwards
                 //       compression, OTT-style
-                if (!sidechain_active) {
+                if (!sidechain_active_) {
                     constexpr float base_threshold_dbfs = 0.0f;
                     const float frequency = fft_frequency_increment * bin_idx;
 
@@ -440,7 +445,7 @@ void SpectralCompressorProcessor::processBlock(
                     // `windowing_interval`, otherwise our attack and release
                     // times will be all messed up
                     .sampleRate = effective_sample_rate,
-                    .maximumBlockSize = max_samples_per_block,
+                    .maximumBlockSize = max_samples_per_block_,
                     .numChannels =
                         static_cast<uint32>(getMainBusNumInputChannels())});
             }
@@ -470,9 +475,9 @@ void SpectralCompressorProcessor::processBlock(
                              size_t /*channel*/) {};
 
     // We'll process the input signal in windows, using overlap-add
-    if (sidechain_active) {
+    if (sidechain_active_) {
         process_data.stft->process(
-            main_io, sidechain_io, 1 << windowing_overlap_order, makeup_gain,
+            main_io, sidechain_io, 1 << windowing_overlap_order_, makeup_gain,
             [&process_data](const std::span<std::complex<float>>& fft,
                             size_t /*channel*/) {
                 // If sidechaining is active, we set the compressor thresholds
@@ -508,7 +513,7 @@ void SpectralCompressorProcessor::processBlock(
                             [compressor_idx] /
                         num_channels;
                     process_data.spectral_compressors[compressor_idx]
-                        .setThreshold(sidechain_exponential
+                        .setThreshold(sidechain_exponential_
                                           ? mean_magnitude
                                           : juce::Decibels::gainToDecibels(
                                                 mean_magnitude));
@@ -518,13 +523,13 @@ void SpectralCompressorProcessor::processBlock(
             },
             preprocess_fn, process_fn, postprocess_fn);
     } else {
-        process_data.stft->process(main_io, 1 << windowing_overlap_order,
+        process_data.stft->process(main_io, 1 << windowing_overlap_order_,
                                    makeup_gain, preprocess_fn, process_fn,
                                    postprocess_fn);
     }
 
-    mixer.setWetLatency(process_data.stft->latency_samples());
-    mixer.mixWetSamples(main_block);
+    mixer_.setWetLatency(process_data.stft->latency_samples());
+    mixer_.mixWetSamples(main_block);
 }
 
 bool SpectralCompressorProcessor::hasEditor() const {
@@ -540,15 +545,15 @@ juce::AudioProcessorEditor* SpectralCompressorProcessor::createEditor() {
 void SpectralCompressorProcessor::getStateInformation(
     juce::MemoryBlock& destData) {
     const std::unique_ptr<juce::XmlElement> xml =
-        parameters.copyState().createXml();
+        parameters_.copyState().createXml();
     copyXmlToBinary(*xml, destData);
 }
 
 void SpectralCompressorProcessor::setStateInformation(const void* data,
                                                       int sizeInBytes) {
     const auto xml = getXmlFromBinary(data, sizeInBytes);
-    if (xml && xml->hasTagName(parameters.state.getType())) {
-        parameters.replaceState(juce::ValueTree::fromXml(*xml));
+    if (xml && xml->hasTagName(parameters_.state.getType())) {
+        parameters_.replaceState(juce::ValueTree::fromXml(*xml));
     }
 
     // TODO: Should we do this here, is will `prepareToPlay()` always be called
@@ -559,13 +564,13 @@ void SpectralCompressorProcessor::setStateInformation(const void* data,
     //       called during playback (without `prepareToPlay()` being called
     //       first)?
     // TODO: Move the latency computation elsewhere
-    const size_t new_window_size = 1 << fft_order;
+    const size_t new_window_size = 1 << fft_order_;
     setLatencySamples(new_window_size);
 }
 
 void SpectralCompressorProcessor::update_and_swap_process_data() {
-    process_data.modify_and_swap([this](ProcessData& process_data) {
-        process_data.stft.emplace(getMainBusNumInputChannels(), fft_order);
+    process_data_.modify_and_swap([this](ProcessData& process_data) {
+        process_data.stft.emplace(getMainBusNumInputChannels(), fft_order_);
 
         // Every FFT bin on both channels gets its own compressor, hooray! The
         // `fft_window_size / 2` is because the first bin is the DC offset and
@@ -581,8 +586,8 @@ void SpectralCompressorProcessor::update_and_swap_process_data() {
 
         // After resizing the compressors are uninitialized and should be
         // reinitialized
-        compressor_settings_changed = true;
-        last_effective_sample_rate = 0.0;
+        compressor_settings_changed_ = true;
+        last_effective_sample_rate_ = 0.0;
     });
 }
 

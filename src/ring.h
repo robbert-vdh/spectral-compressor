@@ -40,26 +40,26 @@ class RingBuffer {
     /**
      * Initialize the ring buffer to contain `size` `T`s.
      */
-    RingBuffer(size_t size) : buffer(size, 0.0) {}
+    RingBuffer(size_t size) : buffer_(size, 0.0) {}
 
     /**
      * Resize the ring buffer to be able to contain `new_size` elements. This
      * will reset the current position to 0. Existing data will not be cleared.
      */
     void resize(size_t new_size) {
-        buffer.resize(new_size);
-        current_pos = 0;
+        buffer_.resize(new_size);
+        current_pos_ = 0;
     }
 
     /**
      * Returns the ring buffer's current size.
      */
-    inline size_t size() const { return buffer.size(); }
+    inline size_t size() const { return buffer_.size(); }
 
     /**
      * Returns the current head position in the ring buffer.
      */
-    inline size_t pos() const { return current_pos; }
+    inline size_t pos() const { return current_pos_; }
 
     /**
      * Copy `num` samples from `src` into the ring buffer, starting at `pos()`.
@@ -74,19 +74,19 @@ class RingBuffer {
      * @throw std::invalid_argument When `num > size()`.
      */
     size_t read_n_from(const T* src, size_t num) {
-        if (num > buffer.size()) {
+        if (num > buffer_.size()) {
             throw std::invalid_argument(
                 "num > size() in RingBuffer::read_n_from()");
         }
 
         const auto& [num_to_end, num_from_start] =
-            split_range_from(current_pos, num);
-        std::copy_n(src, num_to_end, &buffer[current_pos]);
-        std::copy_n(src + num_to_end, num_from_start, &buffer[0]);
+            split_range_from(current_pos_, num);
+        std::copy_n(src, num_to_end, &buffer_[current_pos_]);
+        std::copy_n(src + num_to_end, num_from_start, &buffer_[0]);
 
-        current_pos += num;
-        if (current_pos >= buffer.size()) {
-            current_pos -= buffer.size();
+        current_pos_ += num;
+        if (current_pos_ >= buffer_.size()) {
+            current_pos_ -= buffer_.size();
         }
 
         return num;
@@ -109,23 +109,23 @@ class RingBuffer {
      * @throw std::invalid_argument When `num > size()`.
      */
     size_t copy_n_to(T* dst, size_t num, bool clear) {
-        if (num > buffer.size()) {
+        if (num > buffer_.size()) {
             throw std::invalid_argument(
                 "num > size() in RingBuffer::copy_n_to()");
         }
 
         const auto& [num_to_end, num_from_start] =
-            split_range_from(current_pos, num);
-        std::copy_n(&buffer[current_pos], num_to_end, dst);
-        std::copy_n(&buffer[0], num_from_start, dst + num_to_end);
+            split_range_from(current_pos_, num);
+        std::copy_n(&buffer_[current_pos_], num_to_end, dst);
+        std::copy_n(&buffer_[0], num_from_start, dst + num_to_end);
         if (clear) {
-            std::fill_n(&buffer[current_pos], num_to_end, 0.0);
-            std::fill_n(&buffer[0], num_from_start, 0.0);
+            std::fill_n(&buffer_[current_pos_], num_to_end, 0.0);
+            std::fill_n(&buffer_[0], num_from_start, 0.0);
         }
 
-        current_pos += num;
-        if (current_pos >= buffer.size()) {
-            current_pos -= buffer.size();
+        current_pos_ += num;
+        if (current_pos_ >= buffer_.size()) {
+            current_pos_ -= buffer_.size();
         }
 
         return num;
@@ -152,23 +152,23 @@ class RingBuffer {
      * @throw std::invalid_argument When `num > size()`.
      */
     size_t add_n_from_in_place(const T* src, size_t num, float gain = 1.0) {
-        if (num > buffer.size()) {
+        if (num > buffer_.size()) {
             throw std::invalid_argument(
                 "num > size() in RingBuffer::copy_n_to()");
         }
 
         const auto& [num_to_end, num_from_start] =
-            split_range_from(current_pos, num);
+            split_range_from(current_pos_, num);
         if (gain == 1.0) {
-            juce::FloatVectorOperations::add(&buffer[current_pos], src,
+            juce::FloatVectorOperations::add(&buffer_[current_pos_], src,
                                              num_to_end);
-            juce::FloatVectorOperations::add(&buffer[0], src + num_to_end,
+            juce::FloatVectorOperations::add(&buffer_[0], src + num_to_end,
                                              num_from_start);
         } else {
-            juce::FloatVectorOperations::addWithMultiply(&buffer[current_pos],
+            juce::FloatVectorOperations::addWithMultiply(&buffer_[current_pos_],
                                                          src, gain, num_to_end);
             juce::FloatVectorOperations::addWithMultiply(
-                &buffer[0], src + num_to_end, gain, num_from_start);
+                &buffer_[0], src + num_to_end, gain, num_from_start);
         }
 
         return num;
@@ -189,15 +189,15 @@ class RingBuffer {
      * @throw std::invalid_argument When `num > size()`.
      */
     size_t read_n_from_in_place(const T* src, size_t num) {
-        if (num > buffer.size()) {
+        if (num > buffer_.size()) {
             throw std::invalid_argument(
                 "num > size() in RingBuffer::copy_n_to()");
         }
 
         const auto& [num_to_end, num_from_start] =
-            split_range_from(current_pos, num);
-        std::copy_n(src, num_to_end, &buffer[current_pos]);
-        std::copy_n(src + num_to_end, num_from_start, &buffer[0]);
+            split_range_from(current_pos_, num);
+        std::copy_n(src, num_to_end, &buffer_[current_pos_]);
+        std::copy_n(src + num_to_end, num_from_start, &buffer_[0]);
 
         return num;
     }
@@ -217,7 +217,7 @@ class RingBuffer {
      * @throw std::invalid_argument When `num > size()`.
      */
     size_t copy_last_n_to(T* dst, size_t num) {
-        if (num > buffer.size()) {
+        if (num > buffer_.size()) {
             throw std::invalid_argument(
                 "num > size() in RingBuffer::copy_n_to()");
         }
@@ -226,12 +226,12 @@ class RingBuffer {
         // operator instead of a modulus so you need this abomination when
         // dealing with negative numbers
         const size_t start_pos =
-            (current_pos - num + buffer.size()) % buffer.size();
+            (current_pos_ - num + buffer_.size()) % buffer_.size();
 
         const auto& [num_to_end, num_from_start] =
             split_range_from(start_pos, num);
-        std::copy_n(&buffer[start_pos], num_to_end, dst);
-        std::copy_n(&buffer[0], num_from_start, dst + num_to_end);
+        std::copy_n(&buffer_[start_pos], num_to_end, dst);
+        std::copy_n(&buffer_[0], num_from_start, dst + num_to_end);
 
         return num;
     }
@@ -249,10 +249,10 @@ class RingBuffer {
      * ```
      */
     std::pair<size_t, size_t> split_range_from(size_t from, size_t num) {
-        const size_t num_to_end = std::min(num, buffer.size() - from);
+        const size_t num_to_end = std::min(num, buffer_.size() - from);
         return std::pair(num_to_end, num - num_to_end);
     }
 
-    std::vector<T> buffer;
-    size_t current_pos = 0;
+    std::vector<T> buffer_;
+    size_t current_pos_ = 0;
 };

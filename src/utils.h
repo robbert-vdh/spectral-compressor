@@ -30,7 +30,7 @@ class LambdaAsyncUpdater : public juce::AsyncUpdater {
     void handleAsyncUpdate() override;
 
    private:
-    fu2::unique_function<void()> callback;
+    fu2::unique_function<void()> callback_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LambdaAsyncUpdater)
 };
@@ -49,7 +49,7 @@ class LambdaParameterListener
                           float newValue) override;
 
    private:
-    fu2::unique_function<void(const juce::String&, float)> callback;
+    fu2::unique_function<void(const juce::String&, float)> callback_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LambdaParameterListener)
 };
@@ -71,9 +71,9 @@ class AtomicallySwappable {
      * Default initalizes the objects.
      */
     AtomicallySwappable()
-        : pointers(Pointers{.active = &primary, .inactive = &secondary}),
-          primary(),
-          secondary() {}
+        : pointers_(Pointers{.active = &primary_, .inactive = &secondary_}),
+          primary_(),
+          secondary_() {}
 
     /**
      * Initialize the objects with some default value.
@@ -82,9 +82,9 @@ class AtomicallySwappable {
      *   to the inactive slot.
      */
     AtomicallySwappable(T initial)
-        : pointers(Pointers{.active = &primary, .inactive = &secondary}),
-          primary(initial),
-          secondary(initial) {}
+        : pointers_(Pointers{.active = &primary_, .inactive = &secondary_}),
+          primary_(initial),
+          secondary_(initial) {}
 
     /**
      * Return a reference to currently active object. This should be done once
@@ -95,7 +95,7 @@ class AtomicallySwappable {
         // We'll swap the pointer on the audio thread so that two resizes in a
         // row in between audio processing calls don't cause weird behaviour
         bool expected = true;
-        if (needs_swap.compare_exchange_strong(expected, false)) {
+        if (needs_swap_.compare_exchange_strong(expected, false)) {
             // The CaS should be atomic, even though GCC will always return
             // false for the `is_lock_free()`/`is_always_lock_free()` on 128-bit
             // types
@@ -103,15 +103,15 @@ class AtomicallySwappable {
 
             Pointers current_pointers, updated_pointers;
             do {
-                current_pointers = pointers;
+                current_pointers = pointers_;
                 updated_pointers =
                     Pointers{.active = current_pointers.inactive,
                              .inactive = current_pointers.active};
-            } while (!pointers.compare_exchange_weak(current_pointers,
-                                                     updated_pointers));
+            } while (!pointers_.compare_exchange_weak(current_pointers,
+                                                      updated_pointers));
         }
 
-        return *pointers.load().active;
+        return *pointers_.load().active;
     }
 
     /**
@@ -126,17 +126,17 @@ class AtomicallySwappable {
         // In case two mutations are performed in a row, we don't want the audio
         // thread swapping the objects while we're modifying that same object
         // from another thread
-        num_resizing_threads.fetch_add(1);
-        needs_swap = false;
+        num_resizing_threads_.fetch_add(1);
+        needs_swap_ = false;
 
-        std::lock_guard lock(resize_mutex);
-        modify_fn(*pointers.load().inactive);
+        std::lock_guard lock(resize_mutex_);
+        modify_fn(*pointers_.load().inactive);
 
         // If for whatever reason multiple threads are calling this function at
         // the same time, then only the last one may set the swap flag to
         // prevent (admittedly super rare) data races
-        if (num_resizing_threads.fetch_sub(1) == 1) {
-            needs_swap = true;
+        if (num_resizing_threads_.fetch_sub(1) == 1) {
+            needs_swap_ = true;
         }
     }
 
@@ -149,10 +149,10 @@ class AtomicallySwappable {
      */
     template <typename F>
     void clear(F clear_fn) {
-        std::lock_guard lock(resize_mutex);
+        std::lock_guard lock(resize_mutex_);
 
-        clear_fn(primary);
-        clear_fn(secondary);
+        clear_fn(primary_);
+        clear_fn(secondary_);
     }
 
    private:
@@ -166,16 +166,16 @@ class AtomicallySwappable {
      * at the same time another who just got access to the resize mutex is
      * working on the now active object.
      */
-    std::atomic_int num_resizing_threads = 0;
-    std::mutex resize_mutex;
+    std::atomic_int num_resizing_threads_ = 0;
+    std::mutex resize_mutex_;
 
     struct Pointers {
         T* active;
         T* inactive;
     };
-    std::atomic_bool needs_swap = false;
-    std::atomic<Pointers> pointers;
+    std::atomic_bool needs_swap_ = false;
+    std::atomic<Pointers> pointers_;
 
-    T primary;
-    T secondary;
+    T primary_;
+    T secondary_;
 };

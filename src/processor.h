@@ -109,53 +109,53 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * This contains all of our scratch buffers, ring buffers, compressors, and
      * everything else that depends on the FFT window size.
      */
-    AtomicallySwappable<ProcessData> process_data;
+    AtomicallySwappable<ProcessData> process_data_;
 
     /**
      * A dry-wet mixer we'll use to be able to blend the processed and the
      * unprocessed signals.
      */
-    juce::dsp::DryWetMixer<float> mixer;
+    juce::dsp::DryWetMixer<float> mixer_;
 
     /**
      * Will be set during `prepareToPlay()`, needed to initialize compressors
      * when resizing our buffers.
      */
-    juce::uint32 max_samples_per_block = 0;
+    juce::uint32 max_samples_per_block_ = 0;
     /**
      * The 'effective sample rate' (sample rate divided by the windowing
      * interval) for the last processing cycle. If this changes, then we'll need
      * to adjust our compressors accordingly.
      */
-    double last_effective_sample_rate = 0.0;
+    double last_effective_sample_rate_ = 0.0;
 
-    juce::AudioProcessorValueTreeState parameters;
+    juce::AudioProcessorValueTreeState parameters_;
 
     /**
      * This is applied after windowing, just before the forward FFT
      * transformation.
      */
-    std::atomic<float>& input_gain_db;
+    std::atomic<float>& input_gain_db_;
     /**
      * This is essentially the makeup gain, in dB. When automatic makeup gain is
      * enabled this is added on top of that.
      */
-    std::atomic<float>& output_gain_db;
+    std::atomic<float>& output_gain_db_;
     /**
      * Try to automatically compensate for low thresholds. Doesn't do anything
      * when sidechaining is active.
      */
-    juce::AudioParameterBool& auto_makeup_gain;
+    juce::AudioParameterBool& auto_makeup_gain_;
     /**
      * How much of the dry signal to mix in with the processed signal. This
      * mixing is done after applying the output gain.
      */
-    std::atomic<float>& dry_wet_ratio;
+    std::atomic<float>& dry_wet_ratio_;
 
     /**
      * If true, set the compressor thresholds based on the sidechain signal.
      */
-    juce::AudioParameterBool& sidechain_active;
+    juce::AudioParameterBool& sidechain_active_;
     /**
      * If set to true, the compressor will be configured based on raw
      * magnitudes, even though it expects decibels. This is incorrect, but it
@@ -163,39 +163,39 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      *
      * TODO: Decide on if we want to keep this
      */
-    juce::AudioParameterBool& sidechain_exponential;
+    juce::AudioParameterBool& sidechain_exponential_;
     /**
      * Compressor ratio, where everything above 1.0 means that the signal will
      * be compressed above the threshold.
      */
-    std::atomic<float>& compressor_ratio;
+    std::atomic<float>& compressor_ratio_;
     /**
      * Compressor release time in milliseconds.
      */
-    std::atomic<float>& compressor_attack_ms;
+    std::atomic<float>& compressor_attack_ms_;
     /**
      * Compressor attack time in milliseconds.
      */
-    std::atomic<float>& compressor_release_ms;
+    std::atomic<float>& compressor_release_ms_;
     /**
      * Will cause the compressor settings to be updated on the next processing
      * cycle whenever a compressor parameter changes.
      */
-    LambdaParameterListener compressor_settings_listener;
+    LambdaParameterListener compressor_settings_listener_;
     /**
      * Will be set in `CompressorSettingsListener` when any of the compressor
      * related settings change so we can update our compressors. We'll
      * initialize this to true so the compressors will be initialized during the
      * first processing cycle.
      */
-    std::atomic_bool compressor_settings_changed = true;
+    std::atomic_bool compressor_settings_changed_ = true;
 
     /**
      * The order (where `fft_window_size = 1 << fft_order`) for our spectral
      * operations. When this gets changed, we'll resize all of our buffers and
      * atomically swap the current and the resized buffers.
      */
-    juce::AudioParameterInt& fft_order;
+    juce::AudioParameterInt& fft_order_;
     /**
      * The order of the overlap for the windowing (where
      * `windowing_overlap_times = 1 1 << windowing_overlap_order`). We end up
@@ -204,17 +204,17 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      * also have to update our compressors since the effective sample rate also
      * changes.
      */
-    juce::AudioParameterInt& windowing_overlap_order;
+    juce::AudioParameterInt& windowing_overlap_order_;
     /**
      * Atomically resizes the object `ProcessData` from a background thread.
      */
-    LambdaAsyncUpdater process_data_updater;
+    LambdaAsyncUpdater process_data_updater_;
     /**
      * When the FFT order parameter changes, we'll have to create a new
      * `ProcessData` object for the new FFT window size (or rather, resize an
      * inactive one to match the new size).
      */
-    LambdaParameterListener fft_order_listener;
+    LambdaParameterListener fft_order_listener_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectralCompressorProcessor)
 };

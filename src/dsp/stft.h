@@ -42,22 +42,22 @@ class STFT {
      */
     STFT(size_t num_channels, size_t fft_order)
         : fft_window_size(1 << fft_order),
-          fft(fft_order),
-          windowing_function(
+          fft_(fft_order),
+          windowing_function_(
               fft_window_size,
               juce::dsp::WindowingFunction<float>::WindowingMethod::hann,
               // TODO: Or should we leave normalization enabled?
               false),
           // JUCE's FFT class interleaves the real and imaginary numbers, so
           // this buffer should be twice the window size in size
-          fft_scratch_buffer(fft_window_size * 2),
-          input_ring_buffers(num_channels, RingBuffer<float>(fft_window_size)),
-          sidechain_ring_buffers(with_sidechain ? num_channels : 0,
-                                 with_sidechain
-                                     ? RingBuffer<float>(fft_window_size)
-                                     : RingBuffer<float>()),
-          output_ring_buffers(num_channels,
-                              RingBuffer<float>(fft_window_size)) {}
+          fft_scratch_buffer_(fft_window_size * 2),
+          input_ring_buffers_(num_channels, RingBuffer<float>(fft_window_size)),
+          sidechain_ring_buffers_(with_sidechain ? num_channels : 0,
+                                  with_sidechain
+                                      ? RingBuffer<float>(fft_window_size)
+                                      : RingBuffer<float>()),
+          output_ring_buffers_(num_channels,
+                               RingBuffer<float>(fft_window_size)) {}
 
     /**
      * The latency introduced by this processor, in samples.
@@ -244,7 +244,7 @@ class STFT {
         // already processed audio before processing a new window
         const size_t already_processed_samples = std::min(
             num_samples, (windowing_interval -
-                          (input_ring_buffers[0].pos() % windowing_interval)) %
+                          (input_ring_buffers_[0].pos() % windowing_interval)) %
                              windowing_interval);
         const size_t samples_to_be_processed =
             num_samples - already_processed_samples;
@@ -261,17 +261,17 @@ class STFT {
         // buffer to prevent feedback is always done in sync
         if (already_processed_samples > 0) {
             for (size_t channel = 0; channel < num_channels; channel++) {
-                input_ring_buffers[channel].read_n_from(
+                input_ring_buffers_[channel].read_n_from(
                     main_io.getReadPointer(channel), already_processed_samples);
-                if (num_windows_processed >= windowing_overlap_times) {
-                    output_ring_buffers[channel].copy_n_to(
+                if (num_windows_processed_ >= windowing_overlap_times) {
+                    output_ring_buffers_[channel].copy_n_to(
                         main_io.getWritePointer(channel),
                         already_processed_samples, true);
                 } else {
                     main_io.clear(channel, 0, already_processed_samples);
                 }
                 if constexpr (sidechain_active) {
-                    sidechain_ring_buffers[channel].read_n_from(
+                    sidechain_ring_buffers_[channel].read_n_from(
                         sidechain_io.getReadPointer(channel),
                         already_processed_samples);
                 }
@@ -287,17 +287,17 @@ class STFT {
             if constexpr (sidechain_active && !bypassed) {
                 // The sidechain input is only used for analysis
                 for (size_t channel = 0; channel < num_channels; channel++) {
-                    sidechain_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.data(), fft_window_size);
-                    windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_window_size);
+                    sidechain_ring_buffers_[channel].copy_last_n_to(
+                        fft_scratch_buffer_.data(), fft_window_size);
+                    windowing_function_.multiplyWithWindowingTable(
+                        fft_scratch_buffer_.data(), fft_window_size);
                     // TODO: We can skip negative frequencies here, right?
-                    fft.performRealOnlyForwardTransform(
-                        fft_scratch_buffer.data(), true);
+                    fft_.performRealOnlyForwardTransform(
+                        fft_scratch_buffer_.data(), true);
 
                     const std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
-                            fft_scratch_buffer.data()),
+                            fft_scratch_buffer_.data()),
                         fft_window_size);
                     sidechain_fn(fft_buffer, channel);
                 }
@@ -317,59 +317,59 @@ class STFT {
                     // transformed data, and the postprocess the results after
                     // the windowing function has been applied after the inverse
                     // transformation.
-                    std::span<float> sample_buffer(fft_scratch_buffer.data(),
+                    std::span<float> sample_buffer(fft_scratch_buffer_.data(),
                                                    fft_window_size);
                     std::span<std::complex<float>> fft_buffer(
                         reinterpret_cast<std::complex<float>*>(
-                            fft_scratch_buffer.data()),
+                            fft_scratch_buffer_.data()),
                         fft_window_size);
 
-                    input_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.data(), fft_window_size);
-                    windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_window_size);
+                    input_ring_buffers_[channel].copy_last_n_to(
+                        fft_scratch_buffer_.data(), fft_window_size);
+                    windowing_function_.multiplyWithWindowingTable(
+                        fft_scratch_buffer_.data(), fft_window_size);
                     preprocess_fn(sample_buffer, channel);
 
-                    fft.performRealOnlyForwardTransform(
-                        fft_scratch_buffer.data());
+                    fft_.performRealOnlyForwardTransform(
+                        fft_scratch_buffer_.data());
                     process_fn(fft_buffer, channel);
 
-                    fft.performRealOnlyInverseTransform(
-                        fft_scratch_buffer.data());
-                    windowing_function.multiplyWithWindowingTable(
-                        fft_scratch_buffer.data(), fft_window_size);
+                    fft_.performRealOnlyInverseTransform(
+                        fft_scratch_buffer_.data());
+                    windowing_function_.multiplyWithWindowingTable(
+                        fft_scratch_buffer_.data(), fft_window_size);
                     postprocess_fn(sample_buffer, channel);
 
                     // After processing the windowed data, we'll add it to our
                     // output ring buffer with any (automatic) makeup gain
                     // applied
-                    output_ring_buffers[channel].add_n_from_in_place(
-                        fft_scratch_buffer.data(), fft_window_size, gain);
+                    output_ring_buffers_[channel].add_n_from_in_place(
+                        fft_scratch_buffer_.data(), fft_window_size, gain);
                 } else {
                     // TODO: Implement the bypass to copy directly between the
                     //       ring buffers instead of going through the scratch
                     //       buffer
-                    input_ring_buffers[channel].copy_last_n_to(
-                        fft_scratch_buffer.data(), windowing_interval);
-                    output_ring_buffers[channel].read_n_from_in_place(
-                        fft_scratch_buffer.data(), windowing_interval);
+                    input_ring_buffers_[channel].copy_last_n_to(
+                        fft_scratch_buffer_.data(), windowing_interval);
+                    output_ring_buffers_[channel].read_n_from_in_place(
+                        fft_scratch_buffer_.data(), windowing_interval);
                 }
             }
 
             // We don't copy over anything to the outputs until we processed a
             // full buffer
-            num_windows_processed += 1;
+            num_windows_processed_ += 1;
 
             // Copy the input audio into our ring buffer and copy the processed
             // audio into the output buffer
             const size_t samples_to_process_this_iteration = std::min(
                 windowing_interval, num_samples - sample_buffer_offset);
             for (size_t channel = 0; channel < num_channels; channel++) {
-                input_ring_buffers[channel].read_n_from(
+                input_ring_buffers_[channel].read_n_from(
                     main_io.getReadPointer(channel) + sample_buffer_offset,
                     samples_to_process_this_iteration);
-                if (num_windows_processed >= windowing_overlap_times) {
-                    output_ring_buffers[channel].copy_n_to(
+                if (num_windows_processed_ >= windowing_overlap_times) {
+                    output_ring_buffers_[channel].copy_n_to(
                         main_io.getWritePointer(channel) + sample_buffer_offset,
                         samples_to_process_this_iteration, true);
                 } else {
@@ -377,7 +377,7 @@ class STFT {
                                   samples_to_process_this_iteration);
                 }
                 if constexpr (sidechain_active) {
-                    sidechain_ring_buffers[channel].read_n_from(
+                    sidechain_ring_buffers_[channel].read_n_from(
                         sidechain_io.getReadPointer(channel) +
                             sample_buffer_offset,
                         samples_to_process_this_iteration);
@@ -395,25 +395,25 @@ class STFT {
      * not copying over audio to the output during the first
      * `windowing_overlap_times` windows.
      */
-    int num_windows_processed = 0;
+    int num_windows_processed_ = 0;
 
     /**
      * The FFT processor.
      */
-    juce::dsp::FFT fft;
+    juce::dsp::FFT fft_;
 
     /**
      * We'll process the signal with overlapping windows that are added to each
      * other to form the output signal. See `input_ring_buffers` for more
      * information on how we'll do this.
      */
-    juce::dsp::WindowingFunction<float> windowing_function;
+    juce::dsp::WindowingFunction<float> windowing_function_;
 
     /**
      * We need a scratch buffer that can contain `fft_window_size * 2` samples
      * for `fft` to work in.
      */
-    std::vector<float> fft_scratch_buffer;
+    std::vector<float> fft_scratch_buffer_;
 
     /**
      * A ring buffer of size `fft_window_size` for every channel. Every
@@ -421,18 +421,18 @@ class STFT {
      * `fft_scratch_buffers` using a window function, process it, and then add
      * the results to `output_ring_buffers`.
      */
-    std::vector<RingBuffer<float>> input_ring_buffers;
+    std::vector<RingBuffer<float>> input_ring_buffers_;
     /**
      * These ring buffers are identical to `input_ring_buffers`, but with data
      * from the sidechain input. When sidechaining is enabled, we set the
      * compressor thresholds based on the magnitudes from the same FFT analysis
      * applied to the sidechain input.
      */
-    std::vector<RingBuffer<float>> sidechain_ring_buffers;
+    std::vector<RingBuffer<float>> sidechain_ring_buffers_;
     /**
      * The processed results as described in the docstring of
      * `input_ring_buffers`. Samples from this buffer will be written to the
      * output.
      */
-    std::vector<RingBuffer<float>> output_ring_buffers;
+    std::vector<RingBuffer<float>> output_ring_buffers_;
 };
