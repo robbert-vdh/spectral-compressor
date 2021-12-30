@@ -104,12 +104,13 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       "Compressor Mode",
                       // This should match `MultiwayCompressor::Mode`
                       juce::StringArray{"Downwards", "Upwards", "Multiway"},
-                      0),
+                      static_cast<int>(
+                          MultiwayCompressor<float>::Mode::multiway)),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_multiway_deadzone_param_name,
                       "Multiway Deadzone",
                       juce::NormalisableRange<float>(0, 15, 0.1),
-                      0,
+                      7,
                       " dB"),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_ratio_param_name,
@@ -120,14 +121,14 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                       compressor_attack_ms_param_name,
                       "Attack",
                       juce::NormalisableRange<float>(0.0, 10000.0, 1.0, 0.2),
-                      50.0,
+                      140.0,
                       " ms",
                       juce::AudioProcessorParameter::genericParameter),
                   std::make_unique<juce::AudioParameterFloat>(
                       compressor_release_ms_param_name,
                       "Release",
                       juce::NormalisableRange<float>(0.0, 10000.0, 1.0, 0.2),
-                      5000.0,
+                      202.0,
                       " ms",
                       juce::AudioProcessorParameter::genericParameter)),
               std::make_unique<juce::AudioProcessorParameterGroup>(
