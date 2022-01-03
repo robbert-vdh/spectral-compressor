@@ -347,6 +347,8 @@ void SpectralCompressorProcessor::processBlockBypassed(
 void SpectralCompressorProcessor::processBlock(
     juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer& /*midiMessages*/) {
+    juce::ScopedNoDenormals noDenormals;
+
     juce::AudioBuffer<float> main_io = getBusBuffer(buffer, true, 0);
     juce::AudioBuffer<float> sidechain_io = getBusBuffer(buffer, true, 1);
 
