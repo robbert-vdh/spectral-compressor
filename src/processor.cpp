@@ -24,6 +24,7 @@ constexpr char input_gain_db_param_name[] = "input_gain";
 constexpr char output_gain_db_param_name[] = "output_gain";
 constexpr char dry_wet_ratio_param_name[] = "mix";
 constexpr char auto_makeup_gain_param_name[] = "auto_makeup_gain";
+constexpr char dc_filter_param_name[] = "dc_filter";
 
 constexpr char compressor_settings_group_name[] = "compressors";
 constexpr char sidechain_active_param_name[] = "sidechain_active";
@@ -73,6 +74,10 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
                   std::make_unique<juce::AudioParameterBool>(
                       auto_makeup_gain_param_name,
                       "Auto Makeup Gain",
+                      true),
+                  std::make_unique<juce::AudioParameterBool>(
+                      dc_filter_param_name,
+                      "DC Filter",
                       true),
                   std::make_unique<juce::AudioParameterFloat>(
                       dry_wet_ratio_param_name,
@@ -170,6 +175,8 @@ SpectralCompressorProcessor::SpectralCompressorProcessor()
           *parameters_.getRawParameterValue(output_gain_db_param_name)),
       auto_makeup_gain_(*dynamic_cast<juce::AudioParameterBool*>(
           parameters_.getParameter(auto_makeup_gain_param_name))),
+      dc_filter_(*dynamic_cast<juce::AudioParameterBool*>(
+          parameters_.getParameter(dc_filter_param_name))),
       dry_wet_ratio_(
           *parameters_.getRawParameterValue(dry_wet_ratio_param_name)),
       sidechain_active_(*dynamic_cast<juce::AudioParameterBool*>(
@@ -438,8 +445,6 @@ void SpectralCompressorProcessor::processBlock(
         // real and imaginary parts are interleaved, so ever bin spans two
         // values in the scratch buffer. We can 'safely' do this cast so we can
         // use the STL's complex value functions.
-        // TODO: It might be nice to add a DC filter, which would be
-        //       very cheap since we're already doing FFT anyways
         for (size_t compressor_idx = 0;
              compressor_idx < process_data.spectral_compressors.size();
              compressor_idx++) {
@@ -509,6 +514,10 @@ void SpectralCompressorProcessor::processBlock(
         //       be safe
         // TODO: We should definitely add a way to recover transients
         //       from the original input audio, that sounds really good
+
+        if (dc_filter_) {
+            fft[0] = 0;
+        }
     };
 
     auto postprocess_fn = [](std::span<float>& /*samples*/,

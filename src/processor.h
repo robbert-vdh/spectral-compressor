@@ -148,6 +148,11 @@ class SpectralCompressorProcessor : public juce::AudioProcessor {
      */
     juce::AudioParameterBool& auto_makeup_gain_;
     /**
+     * Set the DC bin to 0 when enabled. This tends to otherwise just make the
+     * signal a lot louder.
+     */
+    juce::AudioParameterBool& dc_filter_;
+    /**
      * How much of the dry signal to mix in with the processed signal. This
      * mixing is done after applying the output gain.
      */
