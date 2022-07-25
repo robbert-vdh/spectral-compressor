@@ -2,10 +2,9 @@
 
 [![Automated builds](https://github.com/robbert-vdh/spectral-compressor/workflows/Automated%20builds/badge.svg?branch=master&event=push)](https://github.com/robbert-vdh/spectral-compressor/actions?query=workflow%3A%22Automated+builds%22+branch%3Amaster)
 
-**A much improved version of Spectral Compressor is in the process of being
-ported to [NIH-plug](https://github.com/robbert-vdh/nih-plug) and will receive
-additional features there.** **This version of the plugin will not be developed
-any more.**
+**Spectral Compressor has had a major rewrite with better DSP and more features
+and is now part of [NIH-plug](https://github.com/robbert-vdh/nih-plug).** **This
+version of the plugin will not be developed any more.**
 
 Ever wondered what a 16384 band OTT would sound like? Neither did I.
 
